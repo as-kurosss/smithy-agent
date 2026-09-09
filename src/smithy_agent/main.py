@@ -13,6 +13,8 @@ import logging
 import os
 import random
 import sys
+import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +78,14 @@ async def execute_command(
     async with _semaphore:
         command: str = cmd.get("command", "run")
         process_id: str = cmd["process_id"]
+        # The orchestrator is untrusted: process_id is interpolated into
+        # filesystem paths by the executor, so it must be a UUID — anything
+        # else (e.g. "..\..\evil") is rejected before touching the disk.
+        try:
+            uuid.UUID(str(process_id))
+        except (ValueError, AttributeError):
+            logger.warning("Command with malformed process_id %r — ignoring", process_id)
+            return
         process_data: dict[str, Any] = cmd.get("process_data", {})
         run_id: str | None = cmd.get("run_id")
 
@@ -86,6 +96,17 @@ async def execute_command(
             deployment_id = (
                 process_data.get("deployment_id") if isinstance(process_data, dict) else None
             )
+            if executor.is_running(process_id):
+                # Redeploying over a running process would rewrite its files
+                # (and possibly its venv) underneath it — refuse instead.
+                error = f"Process {process_id} is currently running — deploy refused"
+                logger.warning(error)
+                if deployment_id is not None:
+                    try:
+                        await client.ack_deployment(str(deployment_id), "failed", error=error)
+                    except Exception:
+                        logger.exception("Deploy ack for process %s failed", process_id)
+                return
             try:
                 await executor.deploy(
                     process_id,
@@ -193,17 +214,37 @@ async def run_agent(
     agent_name: str,
     agent_url: str,
     join_token: str | None = None,
+    *,
+    agent_id: str | None = None,
+    agent_secret: str | None = None,
+    on_credentials: Callable[[str, str], None] | None = None,
 ) -> None:
-    """Core agent lifecycle: register, heartbeat, poll, execute."""
+    """Core agent lifecycle: register, heartbeat, poll, execute.
+
+    When persisted credentials (``agent_id``/``agent_secret``) are supplied
+    they are presented on registration to prove ownership of the existing
+    agent entry, so restarts do not rotate the secret unnecessarily.
+    """
     global _semaphore
     _semaphore = asyncio.Semaphore(_MAX_CONCURRENT_RUNS)
 
-    client = OrchestratorClient(orchestrator_url, agent_name, agent_url)
+    client = OrchestratorClient(
+        orchestrator_url,
+        agent_name,
+        agent_url,
+        join_token=join_token or os.environ.get("SMITHY_JOIN_TOKEN"),
+        agent_id=agent_id,
+        agent_secret=agent_secret,
+        on_credentials=on_credentials,
+    )
     executor = ProcessExecutor(Path.home() / ".smithy-agent")
 
     try:
-        await client.register(join_token=join_token or os.environ.get("SMITHY_JOIN_TOKEN"))
-        console.print(f"[green]Agent {agent_name!r} registered with {orchestrator_url}[/green]")
+        if client.agent_id and client._secret:
+            console.print(f"[green]Agent {agent_name!r} reusing saved credentials[/green]")
+        else:
+            await client.register()
+            console.print(f"[green]Agent {agent_name!r} registered with {orchestrator_url}[/green]")
 
         # Start background heartbeat
         heartbeat_task = asyncio.create_task(heartbeat_loop(client))

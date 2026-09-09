@@ -31,16 +31,36 @@ def save_config(
     agent_url: str,
     join_token: str | None = None,
     log_level: str = "INFO",
+    agent_id: str | None = None,
+    agent_secret: str | None = None,
 ) -> Path:
+    """Write (or merge into) the config file.
+
+    Merging matters: the service loop updates agent_id/agent_secret while
+    running and must not lose the rest of the config.
+    """
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    payload: dict[str, str] = {
-        "orchestrator_url": orchestrator_url,
-        "agent_name": agent_name,
-        "agent_url": agent_url,
-        "log_level": log_level,
-    }
+    payload: dict[str, Any] = {}
+    try:
+        existing = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        if isinstance(existing, dict):
+            payload.update(existing)
+    except (OSError, json.JSONDecodeError):
+        pass
+    payload.update(
+        {
+            "orchestrator_url": orchestrator_url,
+            "agent_name": agent_name,
+            "agent_url": agent_url,
+            "log_level": log_level,
+        }
+    )
     if join_token:
         payload["join_token"] = join_token
+    if agent_id:
+        payload["agent_id"] = agent_id
+    if agent_secret:
+        payload["agent_secret"] = agent_secret
     CONFIG_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return CONFIG_PATH
 

@@ -17,11 +17,13 @@ param(
     [string]$JoinToken = "",
     [string]$AgentUrl = "",
     [string]$User = "",
-    [string]$Python = ""
+    [string]$Python = "",
+    # Supply-chain pinning: point this at a release tag instead of master
+    # (e.g. https://raw.githubusercontent.com/as-kurosss/smithy-agent/v0.2.1/install-agent.ps1)
+    [string]$RepoUrl = "https://raw.githubusercontent.com/as-kurosss/smithy-agent/master/install-agent.ps1"
 )
 
 $ErrorActionPreference = "Stop"
-$RepoUrl = "https://raw.githubusercontent.com/as-kurosss/smithy-agent/master/install-agent.ps1"
 $VenvDir = Join-Path $env:LOCALAPPDATA "smithy-agent\venv"
 
 function Test-Admin {
@@ -49,7 +51,14 @@ function Find-Python {
 if (-not (Test-Admin)) {
     Write-Host "Not running as administrator - relaunching elevated..."
     $tmp = Join-Path $env:TEMP "smithy-agent-install.ps1"
-    Invoke-WebRequest -UseBasicParsing -Uri $RepoUrl -OutFile $tmp
+    if ($MyInvocation.MyCommand.Path -and (Test-Path $MyInvocation.MyCommand.Path)) {
+        # Elevated pass must run the exact copy the user inspected - never a
+        # fresh (possibly different) download from the network.
+        Copy-Item $MyInvocation.MyCommand.Path $tmp -Force
+    } else {
+        # irm|iex entry: no file on disk - pin to whatever RepoUrl was set to.
+        Invoke-WebRequest -UseBasicParsing -Uri $RepoUrl -OutFile $tmp
+    }
 
     # Rebuild the invocation as an encoded command: values starting with "-"
     # (join tokens are base64-ish) cannot be passed as bare -File arguments.

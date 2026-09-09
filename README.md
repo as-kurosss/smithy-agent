@@ -70,3 +70,14 @@ What you get:
 
 Registration honours `AGENT_JOIN_TOKEN` (pre-shared in the orchestrator
 settings) or an admin JWT — whichever you pass with `--join-token`.
+
+## Privacy note: failure screenshots
+
+On a failed run the agent (with the [screenshot] extra installed) captures
+the **entire virtual screen** — all monitors and every visible window, not
+just the automated app — and uploads it to the orchestrator. Keep this in
+mind on shared/multi-user machines: anything on screen at the moment of
+failure (other apps, browser sessions, passwords) ends up in the cloud.
+
+Deploy with the plain smithy-agent package if screenshots are unwanted;
+the agent runs fine without the extra and simply skips capture.

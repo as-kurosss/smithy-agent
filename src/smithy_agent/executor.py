@@ -217,7 +217,12 @@ class ProcessExecutor:
     # ------------------------------------------------------------------
 
     async def stop(self, process_id: str) -> None:
-        """Kill a running subprocess by process id."""
+        """Kill a running subprocess — including its child process tree.
+
+        A deployed RPA process routinely spawns children (browsers, office
+        apps); on Windows ``terminate()`` would leave that whole tree alive,
+        so the tree is killed via ``taskkill /T`` instead.
+        """
         proc = self._processes.get(process_id)
         if proc is None or proc.returncode is not None:
             logger.warning("Process %s is not running — nothing to stop", process_id)
@@ -225,13 +230,31 @@ class ProcessExecutor:
 
         logger.info("Stopping process %s (pid=%s)", process_id, proc.pid)
         try:
-            proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=10.0)
-            except TimeoutError:
-                logger.warning("Process %s did not terminate — killing", process_id)
-                proc.kill()
-                await proc.wait()
+            if sys.platform == "win32":
+                killer = await asyncio.create_subprocess_exec(
+                    "taskkill",
+                    "/PID",
+                    str(proc.pid),
+                    "/T",
+                    "/F",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    creationflags=_NO_WINDOW,
+                )
+                await killer.wait()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=10.0)
+                except TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+            else:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=10.0)
+                except TimeoutError:
+                    logger.warning("Process %s did not terminate — killing", process_id)
+                    proc.kill()
+                    await proc.wait()
         finally:
             self._processes.pop(process_id, None)
 
@@ -253,15 +276,26 @@ class ProcessExecutor:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def _run_cmd(*args: str) -> None:
-        """Run a shell command and wait for it to finish."""
+    async def _run_cmd(*args: str, timeout_s: float = 600.0) -> None:
+        """Run a shell command and wait for it to finish.
+
+        A hung command (pip stalling on a slow mirror) would otherwise hold
+        a run-semaphore slot forever, so the child is killed on timeout.
+        """
         proc = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=_NO_WINDOW,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+        except TimeoutError as exc:
+            proc.kill()
+            await proc.wait()
+            raise RuntimeError(
+                f"Command timed out after {timeout_s:.0f}s: {' '.join(args)}"
+            ) from exc
         if proc.returncode != 0:
             raise RuntimeError(
                 f"Command failed ({proc.returncode}): {' '.join(args)}\n"

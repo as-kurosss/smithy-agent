@@ -21,7 +21,7 @@ import sys
 import time
 from pathlib import Path
 
-from smithy_agent.config import CONFIG_PATH, load_config
+from smithy_agent.config import CONFIG_PATH, load_config, save_config
 
 logger = logging.getLogger("smithy_agent")
 
@@ -79,6 +79,18 @@ def run_forever() -> None:
     while True:
         logger.info("Agent starting (restart backoff %.0fs)", backoff)
         start = time.monotonic()
+
+        def persist_credentials(agent_id: str, secret: str) -> None:
+            save_config(
+                str(cfg["orchestrator_url"]),
+                str(cfg["agent_name"]),
+                str(cfg["agent_url"]),
+                cfg.get("join_token"),
+                str(cfg.get("log_level", "INFO")),
+                agent_id=agent_id,
+                agent_secret=secret,
+            )
+
         try:
             asyncio.run(
                 run_agent(
@@ -86,6 +98,9 @@ def run_forever() -> None:
                     str(cfg["agent_name"]),
                     str(cfg["agent_url"]),
                     join_token=cfg.get("join_token"),
+                    agent_id=cfg.get("agent_id"),
+                    agent_secret=cfg.get("agent_secret"),
+                    on_credentials=persist_credentials,
                 )
             )
         except Exception:
