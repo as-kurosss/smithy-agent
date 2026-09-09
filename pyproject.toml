@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "smithy-agent"
+version = "0.1.0"
+description = "Smithy RPA agent - runs on Windows machines and executes processes dispatched by a smithy-cloud orchestrator"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "as-kurosss" }]
+dependencies = [
+    "httpx>=0.27.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.12",
+    "mypy>=1.18",
+]
+
+[project.urls]
+Homepage = "https://github.com/as-kurosss/smithy-agent"
+Repository = "https://github.com/as-kurosss/smithy-agent"
+Issues = "https://github.com/as-kurosss/smithy-agent/issues"
+
+[project.scripts]
+smithy-agent = "smithy_agent.main:main"
+smithy-agent-service = "smithy_agent.service:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/smithy_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "SIM"]
+# B008 (function call in default) is the idiomatic argparse/click pattern.
+ignore = ["B008"]
+
+[tool.mypy]
+python_version = "3.11"
