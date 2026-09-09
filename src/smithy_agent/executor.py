@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # children (the deployed process, pip, venv) would each open a flashing
 # console window - CREATE_NO_WINDOW suppresses it. The child still runs in
 # the interactive desktop session, so UIA automation is unaffected.
-_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
 
 
 def _check_rel_path(rel: str) -> None:

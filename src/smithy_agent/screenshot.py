@@ -39,19 +39,19 @@ def capture_screenshot() -> tuple[bytes, str] | None:
             img = Image.frombytes("RGB", raw.size, raw.rgb)
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=True)
-        data = buf.getvalue()
     except Exception:
         logger.exception("Screenshot capture failed")
         return None
+    data = buf.getvalue()
 
     if len(data) > MAX_SCREENSHOT_BYTES:
         # Downscale just enough to fit (keep aspect ratio, JPEG-quality trick
         # is not applicable - keep PNG but shrink).
         scale = (MAX_SCREENSHOT_BYTES / len(data)) ** 0.5
         img = img.resize((max(1, int(img.width * scale)), max(1, int(img.height * scale))))
-        buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=True)
-        data = buf.getvalue()
+        resized = io.BytesIO()
+        img.save(resized, format="PNG", optimize=True)
+        data = resized.getvalue()
         if len(data) > MAX_SCREENSHOT_BYTES:
             logger.warning("Screenshot exceeds size cap even after downscale - dropping")
             return None
