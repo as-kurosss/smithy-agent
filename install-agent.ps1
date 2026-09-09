@@ -50,12 +50,18 @@ if (-not (Test-Admin)) {
     Write-Host "Not running as administrator - relaunching elevated..."
     $tmp = Join-Path $env:TEMP "smithy-agent-install.ps1"
     Invoke-WebRequest -UseBasicParsing -Uri $RepoUrl -OutFile $tmp
-    $forward = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $tmp)
+
+    # Rebuild the invocation as an encoded command: values starting with "-"
+    # (join tokens are base64-ish) cannot be passed as bare -File arguments.
+    function Esc([string]$s) { return "'" + $s.Replace("'", "''") + "'" }
+    $inner = "& '$tmp'"
     foreach ($p in @("Orchestrator", "Name", "JoinToken", "AgentUrl", "User", "Python")) {
         $val = Get-Variable -Name $p -ValueOnly
-        if ($val) { $forward += @("-$p", $val) }
+        if ($val) { $inner += " -$p $(Esc $val)" }
     }
-    $proc = Start-Process powershell -Verb RunAs -Wait -PassThru -ArgumentList $forward
+    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
+    $proc = Start-Process powershell -Verb RunAs -Wait -PassThru -ArgumentList @(
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $enc)
     exit $proc.ExitCode
 }
 
