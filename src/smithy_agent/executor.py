@@ -7,9 +7,29 @@ import hashlib
 import logging
 import os
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 logger = logging.getLogger(__name__)
+
+
+def _check_rel_path(rel: str) -> None:
+    """Reject deploy/run paths that could escape the process directory.
+
+    Checks both the platform path view and the Windows view: on POSIX a
+    string like ``C:\\Windows\\win.ini`` is a *relative* path whose
+    backslashes are not separators, but the agent is Windows-first and the
+    orchestrator is untrusted - the Windows interpretation is what matters.
+    """
+    candidate = Path(rel)
+    win = PureWindowsPath(rel)
+    if (
+        candidate.is_absolute()
+        or win.is_absolute()
+        or win.drive
+        or ".." in candidate.parts
+        or ".." in win.parts
+    ):
+        raise ValueError(f"Refusing path outside process dir: {rel!r}")
 
 
 class ProcessExecutor:
@@ -56,9 +76,8 @@ class ProcessExecutor:
         # Write source files (reject paths escaping the process directory)
         base = proc_dir.resolve()
         for rel_path, content in files.items():
+            _check_rel_path(rel_path)
             candidate = Path(rel_path)
-            if candidate.is_absolute() or ".." in candidate.parts:
-                raise ValueError(f"Refusing to write outside process dir: {rel_path!r}")
             file_path = (base / candidate).resolve()
             if file_path != base and base not in file_path.parents:
                 raise ValueError(f"Refusing to write outside process dir: {rel_path!r}")
@@ -129,9 +148,8 @@ class ProcessExecutor:
     @staticmethod
     def _resolve_entry(proc_dir: Path, entry_point: str) -> Path:
         """Resolve entry_point strictly inside proc_dir (traversal guard)."""
+        _check_rel_path(entry_point)
         candidate = Path(entry_point)
-        if candidate.is_absolute() or ".." in candidate.parts:
-            raise ValueError(f"Refusing to run outside process dir: {entry_point!r}")
         base = proc_dir.resolve()
         entry = (base / candidate).resolve()
         if entry != base and base not in entry.parents:
