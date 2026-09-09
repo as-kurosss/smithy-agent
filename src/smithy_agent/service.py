@@ -30,23 +30,38 @@ _RESTART_BACKOFF_START_S = 5.0
 _RESTART_BACKOFF_MAX_S = 60.0
 
 
-def _setup_file_logging() -> Path:
+def _log_path() -> Path:
     log_dir = CONFIG_PATH.parent
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "agent.log"
-    handler = logging.handlers.RotatingFileHandler(
-        log_path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    return log_dir / "agent.log"
+
+
+def _configure_logging(log_path: Path, level: int) -> None:
+    """File logging always; console only when one exists.
+
+    Under ``pythonw.exe`` (the windowless scheduled-task launcher)
+    ``sys.stderr``/``sys.stdout`` are ``None`` - a StreamHandler on them
+    would lose every record, so it is skipped in that case.
+    """
+    handlers: list[logging.Handler] = [
+        logging.handlers.RotatingFileHandler(
+            log_path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+        )
+    ]
+    if sys.stderr is not None:
+        handlers.append(logging.StreamHandler(sys.stderr))
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=handlers,
+        force=True,
     )
-    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-    logging.getLogger().addHandler(handler)
-    return log_path
 
 
 def run_forever() -> None:
     """Start the agent and restart it after any exit (crash-restart loop)."""
     from smithy_agent.main import run_agent
 
-    log_path = _setup_file_logging()
     cfg = load_config()
     if not cfg.get("orchestrator_url"):
         print(
@@ -55,16 +70,9 @@ def run_forever() -> None:
         )
         sys.exit(2)
 
-    logging.basicConfig(
-        level=getattr(logging, str(cfg.get("log_level", "INFO")).upper(), logging.INFO),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(sys.stderr)],
-        force=True,
-    )
-    logging.getLogger().addHandler(
-        logging.handlers.RotatingFileHandler(
-            log_path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
-        )
+    _configure_logging(
+        _log_path(),
+        getattr(logging, str(cfg.get("log_level", "INFO")).upper(), logging.INFO),
     )
 
     backoff = _RESTART_BACKOFF_START_S
@@ -105,9 +113,15 @@ def task_command(
 ) -> str:
     """The Register-ScheduledTask PowerShell one-liner for the agent task.
 
+    Uses ``pythonw.exe`` (no console window) when available - the agent logs
+    to a file, the console is pure noise in an interactive desktop session.
     Note: the interpreter path must not contain spaces (Task Scheduler
     rejects quoted -Execute paths on some builds with "file not found").
     """
+    exe = Path(python_exe)
+    windowless = exe.with_name("pythonw.exe")
+    if windowless.is_file():
+        python_exe = str(windowless)
     parts = [
         "$action = New-ScheduledTaskAction -Execute "
         f"'{python_exe}' -Argument '-m smithy_agent.service run' "

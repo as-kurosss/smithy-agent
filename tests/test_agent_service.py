@@ -16,6 +16,18 @@ def test_task_command_defaults() -> None:
     assert f"'{TASK_NAME}'" in cmd
     assert "RestartCount 999" in cmd
     assert "LogonType" not in cmd  # no principal when no --user given
+    assert "pythonw" not in cmd  # no sibling pythonw.exe in the test path
+
+
+def test_task_command_prefers_pythonw(tmp_path: Path) -> None:
+    from smithy_agent.service import task_command
+
+    py = tmp_path / "python.exe"
+    pyw = tmp_path / "pythonw.exe"
+    pyw.touch()
+    cmd = task_command(str(py))
+    assert f"'{pyw}'" in cmd
+    assert f"'{py}'" not in cmd
 
 
 def test_task_command_with_user() -> None:
