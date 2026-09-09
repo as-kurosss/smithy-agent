@@ -211,7 +211,10 @@ def update_package() -> bool:
     """
     import subprocess as sp
 
+    from smithy_agent.client import agent_version
+
     print(f"Upgrading smithy-agent (interpreter: {sys.executable})...")
+    before = agent_version()
     proc = sp.run(
         [
             sys.executable,
@@ -219,15 +222,20 @@ def update_package() -> bool:
             "pip",
             "install",
             "--upgrade",
+            # Bypass the local HTTP cache: the index page may be up to
+            # ~10 min stale after a release, which would no-op the upgrade.
+            "--no-cache-dir",
             "smithy-agent[screenshot]",
         ]
     )
     if proc.returncode != 0:
         print("Upgrade failed (see pip output above)", file=sys.stderr)
         return False
-    from smithy_agent.client import agent_version
-
-    print(f"Now installed: smithy-agent {agent_version()}")
+    after = agent_version()
+    if after == before:
+        print(f"Version unchanged ({after}) — nothing to restart", file=sys.stderr)
+        return False
+    print(f"Upgraded: {before} -> {after}")
     print("Restarting the scheduled task to pick up the new version...")
     stop_task()
     if not start_task():
