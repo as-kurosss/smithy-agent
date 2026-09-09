@@ -5,6 +5,29 @@ Unattended worker that runs on a Windows machine, registers itself with a
 polls it for commands, and executes deployed process bundles (Python code)
 in isolated per-process venvs.
 
+## One-line install (Windows)
+
+Regular PowerShell (it self-elevates and installs Python 3.12 via winget if
+missing):
+
+```powershell
+irm https://raw.githubusercontent.com/as-kurosss/smithy-agent/master/install-agent.ps1 | iex
+```
+
+With parameters:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/as-kurosss/smithy-agent/master/install-agent.ps1))) `
+    -Orchestrator https://cloud.example.com -Name prod-1 -JoinToken <TOKEN>
+```
+
+## Manual install
+
+```bash
+pip install smithy-agent
+```
+
+
 ## Quick start (manual, foreground)
 
 ```bash
