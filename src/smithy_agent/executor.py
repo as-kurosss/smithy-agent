@@ -167,6 +167,8 @@ class ProcessExecutor:
         self,
         process_id: str,
         entry_point: str,
+        *,
+        env: dict[str, str] | None = None,
     ) -> asyncio.subprocess.Process:
         """Run the deployed process as a subprocess.
 
@@ -176,6 +178,10 @@ class ProcessExecutor:
             The deployed process id (must have been :meth:`deploy`-ed first).
         entry_point:
             Relative path to the Python entry point, e.g. ``main.py``.
+        env:
+            Extra environment entries (cloud coordinates, ``SMITHY_ASSET_*``
+            credentials) merged over ``os.environ``. ``None`` keeps the
+            plain base environment.
 
         Returns
         -------
@@ -200,6 +206,8 @@ class ProcessExecutor:
             "PYTHONUTF8": "1",
             "PYTHONIOENCODING": "utf-8",
         }
+        if env:
+            child_env.update(env)
         proc = await asyncio.create_subprocess_exec(
             str(python_exe),
             str(entry),

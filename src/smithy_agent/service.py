@@ -147,7 +147,7 @@ def task_command(
         "$settings = New-ScheduledTaskSettingsSet -RestartCount 999 "
         "-RestartInterval (New-TimeSpan -Minutes 1) "
         "-ExecutionTimeLimit ([TimeSpan]::Zero) "
-        "-AllowStartIfOnBatteries -StartWhenAvailable",
+        "-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable",
     ]
     if user:
         parts.append(
@@ -200,6 +200,43 @@ def install_task(user: str | None = None) -> bool:
 def uninstall_task() -> bool:
     res = _run_powershell(f"Unregister-ScheduledTask -TaskName '{TASK_NAME}' -Confirm:$false")
     return res.returncode == 0
+
+
+def update_package() -> bool:
+    """Upgrade smithy-agent in the current venv and restart the task.
+
+    The running agent keeps the old code until it restarts, so the task is
+    bounced right after a successful upgrade (the crash-restart loop and
+    saved credentials make this seamless).
+    """
+    import subprocess as sp
+
+    print(f"Upgrading smithy-agent (interpreter: {sys.executable})...")
+    proc = sp.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "smithy-agent[screenshot]",
+        ]
+    )
+    if proc.returncode != 0:
+        print("Upgrade failed (see pip output above)", file=sys.stderr)
+        return False
+    from smithy_agent.client import agent_version
+
+    print(f"Now installed: smithy-agent {agent_version()}")
+    print("Restarting the scheduled task to pick up the new version...")
+    stop_task()
+    if not start_task():
+        print(
+            "Task restart failed — start it manually: smithy-agent-service start", file=sys.stderr
+        )
+        return False
+    print("Done.")
+    return True
 
 
 def start_task() -> bool:
@@ -272,6 +309,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("start", help="start the task now")
     sub.add_parser("stop", help="stop the task")
     sub.add_parser("status", help="show the task state")
+    sub.add_parser("update", help="upgrade smithy-agent from PyPI and restart the task")
 
     args = parser.parse_args(argv)
 
@@ -304,6 +342,9 @@ def main(argv: list[str] | None = None) -> None:
         return
     if args.command == "status":
         print(task_status())
+        return
+    if args.command == "update":
+        sys.exit(0 if update_package() else 1)
 
 
 def _auto_url(orchestrator_url: str) -> str:

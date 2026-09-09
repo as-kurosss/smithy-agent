@@ -93,3 +93,21 @@ async def test_valid_deploy_proceeds_and_acks() -> None:
     await agent_main.execute_command(client, executor, cmd)  # type: ignore[arg-type]
     assert len(executor.deploy_calls) == 1
     assert client.acks == [("d1", "deployed", None)]
+
+
+async def test_asset_env_vars_mapping() -> None:
+    from smithy_agent.main import _asset_env_vars
+
+    assets = [
+        {"name": "api-url", "kind": "text", "value": "https://api.example.com", "fields": {}},
+        {
+            "name": "crm",
+            "kind": "credential",
+            "value": "",
+            "fields": {"login": "bot@corp.io", "password": "s3cret!"},
+        },
+    ]
+    env = _asset_env_vars(assets)
+    assert env["SMITHY_ASSET_API_URL"] == "https://api.example.com"
+    assert env["SMITHY_ASSET_CRM_LOGIN"] == "bot@corp.io"
+    assert env["SMITHY_ASSET_CRM_PASSWORD"] == "s3cret!"

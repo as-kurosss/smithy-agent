@@ -12,6 +12,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 import sys
 import uuid
 from collections.abc import Callable
@@ -24,6 +25,7 @@ from smithy_agent.client import (
     HEARTBEAT_INTERVAL_SECONDS,
     POLL_INTERVAL_SECONDS,
     OrchestratorClient,
+    agent_version,
 )
 from smithy_agent.executor import ProcessExecutor
 from smithy_agent.streamer import LogStreamer
@@ -50,6 +52,51 @@ async def heartbeat_loop(client: OrchestratorClient) -> None:
         except Exception:
             logger.exception("Heartbeat failed")
         await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS + random.uniform(0, 2.0))
+
+
+# ------------------------------------------------------------------
+# Assets / child environment
+# ------------------------------------------------------------------
+
+
+def _asset_env_vars(assets: list[dict[str, Any]]) -> dict[str, str]:
+    """Build ``SMITHY_ASSET_*`` env vars for a deployed process.
+
+    Matches the engine's EnvAssetProvider contract:
+    * text asset ``crm-url``  -> ``SMITHY_ASSET_CRM_URL``
+    * credential ``crm`` with fields login/password ->
+      ``SMITHY_ASSET_CRM_LOGIN`` / ``SMITHY_ASSET_CRM_PASSWORD``
+    """
+    env: dict[str, str] = {}
+    for asset in assets:
+        base = "SMITHY_ASSET_" + re.sub(r"[^A-Za-z0-9_]", "_", asset.get("name", "")).upper()
+        if asset.get("kind") == "credential":
+            for field, value in (asset.get("fields") or {}).items():
+                if value != "":
+                    env[f"{base}_{re.sub(r'[^A-Za-z0-9_]', '_', field).upper()}"] = str(value)
+        elif asset.get("value"):
+            env[base] = str(asset["value"])
+    return env
+
+
+async def _run_env(client: OrchestratorClient) -> dict[str, str] | None:
+    """Env additions for a run: cloud coordinates + assets.
+
+    Returns None when the orchestrator cannot be reached for assets — the
+    run proceeds with the base environment rather than dying.
+    """
+    env = {
+        "SMITHY_ORCHESTRATOR_URL": client.orchestrator_url,
+        "SMITHY_AGENT_TOKEN": client.agent_secret or "",
+        "SMITHY_AGENT_VERSION": agent_version(),
+    }
+    try:
+        assets = await client.get_assets()
+    except Exception:
+        logger.warning("Could not fetch assets — running without SMITHY_ASSET_* vars")
+        return None
+    env.update(_asset_env_vars(assets))
+    return env
 
 
 # ------------------------------------------------------------------
@@ -161,8 +208,13 @@ async def execute_command(
                 process_data.get("requirements", []),
             )
 
-            # Run the process
-            proc = await executor.run(process_id, process_data["entry_point"])
+            # Run the process (cloud coordinates + assets ride in the env)
+            extra_env = await _run_env(client)
+            proc = await executor.run(
+                process_id,
+                process_data["entry_point"],
+                env=extra_env,
+            )
 
             # Stream logs back to orchestrator
             streamer = LogStreamer(client, run_id)

@@ -6,6 +6,8 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from typing import Any, cast
 
 import httpx
@@ -15,6 +17,27 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = 5
 HEARTBEAT_INTERVAL_SECONDS = 30
 REAUTH_BACKOFF_S = 60.0
+
+
+def agent_version() -> str:
+    """Installed smithy-agent version, "unknown" when not resolvable."""
+    try:
+        return _pkg_version("smithy-agent")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def engine_version() -> str | None:
+    """Installed smithy-engine version (None when not in this venv).
+
+    The engine rides in the *deployed process* venv, not the agent's own;
+    this reports whatever ``smithy`` is importable from the agent venv —
+    good enough for fleet monitoring until per-run stamping lands.
+    """
+    try:
+        return _pkg_version("smithy")
+    except PackageNotFoundError:
+        return None
 
 
 class OrchestratorError(Exception):
@@ -66,7 +89,11 @@ class OrchestratorClient:
         """
         self.join_token = join_token or self.join_token
         headers = {"Authorization": f"Bearer {self.join_token}"} if self.join_token else None
-        body: dict[str, Any] = {"name": self.agent_name, "url": self.agent_url}
+        body: dict[str, Any] = {
+            "name": self.agent_name,
+            "url": self.agent_url,
+            "version": agent_version(),
+        }
         if self.agent_id and self._secret:
             body["agent_secret"] = self._secret
         resp = await self._http.post("/api/agents", json=body, headers=headers)
@@ -112,8 +139,25 @@ class OrchestratorClient:
     # ------------------------------------------------------------------
 
     async def heartbeat(self) -> None:
-        """Send a single heartbeat to the orchestrator."""
-        await self._post(f"/api/agents/{self._agent_id}/heartbeat")
+        """Send a single heartbeat to the orchestrator (with our versions)."""
+        body: dict[str, Any] = {"status": "online", "version": agent_version()}
+        engine = engine_version()
+        if engine is not None:
+            body["engine_version"] = engine
+        await self._post(f"/api/agents/{self._agent_id}/heartbeat", json=body)
+
+    # ------------------------------------------------------------------
+    # Assets (credentials)
+    # ------------------------------------------------------------------
+
+    async def get_assets(self) -> list[dict[str, Any]]:
+        """Fetch assets for processes: text values + decrypted credentials."""
+        resp = await self._get(f"/api/agents/{self._agent_id}/assets")
+        if resp.status_code == 401:
+            await self._re_authenticate()
+            resp = await self._get(f"/api/agents/{self._agent_id}/assets")
+        resp.raise_for_status()
+        return cast(list[dict[str, Any]], resp.json())
 
     # ------------------------------------------------------------------
     # Polling
@@ -213,6 +257,11 @@ class OrchestratorClient:
         if self.agent_id is None:
             raise OrchestratorError("Agent not registered — call register() first")
         return self.agent_id
+
+    @property
+    def agent_secret(self) -> str | None:
+        """Current agent secret (for injecting into deployed processes)."""
+        return self._secret
 
     @property
     def _auth_headers(self) -> dict[str, str]:
