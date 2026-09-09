@@ -128,6 +128,7 @@ async def execute_command(
 
         logger.info("Executing run %s (process %s)", run_id, process_id)
         _run_to_process[run_id] = process_id
+        failed = False
         try:
             # Report running state before doing any work
             await client.report_status(run_id, "running")
@@ -150,17 +151,36 @@ async def execute_command(
             if proc.returncode == 0:
                 await client.report_status(run_id, "completed")
             else:
+                failed = True
                 await client.report_status(
                     run_id,
                     "failed",
                     error=f"Process exited with code {proc.returncode}",
                 )
         except Exception as exc:
+            failed = True
             logger.exception("Run %s failed", run_id)
             await client.report_status(run_id, "failed", error=str(exc))
         finally:
+            if failed:
+                await _attach_failure_screenshot(client, run_id)
             _run_to_process.pop(run_id, None)
             executor.forget(process_id)
+
+
+async def _attach_failure_screenshot(client: OrchestratorClient, run_id: str) -> None:
+    """Best-effort screenshot on failure: must never mask the real error."""
+    from smithy_agent.screenshot import capture_screenshot
+
+    try:
+        shot = capture_screenshot()
+        if shot is None:
+            return
+        data, filename = shot
+        await client.push_artifact(run_id, filename, "image/png", data)
+        logger.info("Failure screenshot attached to run %s (%d bytes)", run_id, len(data))
+    except Exception:
+        logger.exception("Failed to attach screenshot for run %s", run_id)
 
 
 # ------------------------------------------------------------------

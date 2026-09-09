@@ -128,6 +128,28 @@ class OrchestratorClient:
             json=payload,
         )
 
+    async def push_artifact(
+        self,
+        run_id: str,
+        filename: str,
+        content_type: str,
+        data: bytes,
+    ) -> None:
+        """Upload a binary artifact for a run (e.g. a failure screenshot)."""
+        import base64
+
+        payload: dict[str, Any] = {
+            "run_id": run_id,
+            "filename": filename,
+            "content_type": content_type,
+            "data_base64": base64.b64encode(data).decode("ascii"),
+        }
+        await self._post(
+            f"/api/agents/{self._agent_id}/runs/{run_id}/artifacts",
+            json=payload,
+            retry=True,
+        )
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------

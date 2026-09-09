@@ -196,8 +196,42 @@ def stop_task() -> bool:
 
 
 def task_status() -> str:
-    res = _run_powershell(f"(Get-ScheduledTask -TaskName '{TASK_NAME}' -ErrorAction Stop).State")
-    return res.stdout.decode(errors="replace").strip() or "not installed"
+    """Human-readable one-screen status: task state + agent config + process."""
+    lines: list[str] = []
+    try:
+        res = _run_powershell(
+            f"(Get-ScheduledTask -TaskName '{TASK_NAME}' -ErrorAction Stop).State"
+        )
+        state = res.stdout.decode(errors="replace").strip() or "not installed"
+    except Exception:
+        state = "not installed"
+    lines.append(f"task:    {state} ({TASK_NAME})")
+
+    cfg = load_config()
+    if cfg.get("orchestrator_url"):
+        lines.append(f"agent:   {cfg.get('agent_name', '?')}")
+        lines.append(f"cloud:   {cfg['orchestrator_url']}")
+        if cfg.get("agent_url"):
+            lines.append(f"url:     {cfg['agent_url']}")
+    else:
+        lines.append("agent:   (no config - run `smithy-agent-service install`)")
+
+    # Running interpreter (venv pythonw spawns the real pythonw as a child:
+    # both share the command line, so one match is enough).
+    try:
+        res = _run_powershell(
+            "(Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' AND "
+            "CommandLine LIKE '%smithy_agent.service%'\" "
+            "| Select-Object -First 1 -ExpandProperty ProcessId)"
+        )
+        pid = res.stdout.decode(errors="replace").strip()
+        if pid:
+            lines.append(f"pid:     {pid} (pythonw, background - no console window)")
+    except Exception:
+        pass
+
+    lines.append(f"log:     {CONFIG_PATH.parent / 'agent.log'}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------

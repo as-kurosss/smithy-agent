@@ -101,9 +101,9 @@ if (-not (Test-Path "$VenvDir\Scripts\python.exe")) {
     & $pyExe -m venv $VenvDir
     if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
 }
-Write-Host "Installing smithy-agent (PyPI)..."
+Write-Host "Installing smithy-agent[screenshot] (PyPI)..."
 & "$VenvDir\Scripts\python.exe" -m pip install --upgrade pip --quiet
-& "$VenvDir\Scripts\python.exe" -m pip install --upgrade smithy-agent --quiet
+& "$VenvDir\Scripts\python.exe" -m pip install --upgrade "smithy-agent[screenshot]" --quiet
 if ($LASTEXITCODE -ne 0) { throw "pip install smithy-agent failed" }
 
 # ---------------------------------------------------------------- register
