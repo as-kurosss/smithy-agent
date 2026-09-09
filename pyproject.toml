@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "smithy-agent"
-version = "0.2.0"
+version = "0.2.1"
 description = "Smithy RPA agent - runs on Windows machines and executes processes dispatched by a smithy-cloud orchestrator"
 readme = "README.md"
 license = "MIT"

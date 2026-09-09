@@ -6,10 +6,17 @@ import asyncio
 import hashlib
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path, PureWindowsPath
 
 logger = logging.getLogger(__name__)
+
+# Console-less spawning: the agent runs under pythonw (no console). Console
+# children (the deployed process, pip, venv) would each open a flashing
+# console window - CREATE_NO_WINDOW suppresses it. The child still runs in
+# the interactive desktop session, so UIA automation is unaffected.
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
 def _check_rel_path(rel: str) -> None:
@@ -200,6 +207,7 @@ class ProcessExecutor:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=child_env,
+            creationflags=_NO_WINDOW,
         )
         self._processes[process_id] = proc
         return proc
@@ -251,6 +259,7 @@ class ProcessExecutor:
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            creationflags=_NO_WINDOW,
         )
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
