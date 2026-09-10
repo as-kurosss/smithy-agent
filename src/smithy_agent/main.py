@@ -12,7 +12,6 @@ import asyncio
 import logging
 import os
 import random
-import re
 import sys
 import uuid
 from collections.abc import Callable
@@ -55,48 +54,25 @@ async def heartbeat_loop(client: OrchestratorClient) -> None:
 
 
 # ------------------------------------------------------------------
-# Assets / child environment
+# Run environment
 # ------------------------------------------------------------------
 
 
-def _asset_env_vars(assets: list[dict[str, Any]]) -> dict[str, str]:
-    """Build ``SMITHY_ASSET_*`` env vars for a deployed process.
+async def _run_env(client: OrchestratorClient, process_id: str) -> dict[str, str]:
+    """Env additions for a run: orchestrator coordinates for on-demand lookups.
 
-    Matches the engine's EnvAssetProvider contract:
-    * text asset ``crm-url``  -> ``SMITHY_ASSET_CRM_URL``
-    * credential ``crm`` with fields login/password ->
-      ``SMITHY_ASSET_CRM_LOGIN`` / ``SMITHY_ASSET_CRM_PASSWORD``
+    Assets are **not** dumped into the environment: the engine fetches one
+    asset by id/GUID or name from the orchestrator at run time
+    (``HttpAssetProvider``), scoped to *process_id* so a flow can only read
+    the assets its process is allowed.
     """
-    env: dict[str, str] = {}
-    for asset in assets:
-        base = "SMITHY_ASSET_" + re.sub(r"[^A-Za-z0-9_]", "_", asset.get("name", "")).upper()
-        if asset.get("kind") == "credential":
-            for field, value in (asset.get("fields") or {}).items():
-                if value != "":
-                    env[f"{base}_{re.sub(r'[^A-Za-z0-9_]', '_', field).upper()}"] = str(value)
-        elif asset.get("value"):
-            env[base] = str(asset["value"])
-    return env
-
-
-async def _run_env(client: OrchestratorClient) -> dict[str, str] | None:
-    """Env additions for a run: cloud coordinates + assets.
-
-    Returns None when the orchestrator cannot be reached for assets — the
-    run proceeds with the base environment rather than dying.
-    """
-    env = {
+    return {
         "SMITHY_ORCHESTRATOR_URL": client.orchestrator_url,
+        "SMITHY_AGENT_ID": client.agent_id or "",
         "SMITHY_AGENT_TOKEN": client.agent_secret or "",
         "SMITHY_AGENT_VERSION": agent_version(),
+        "SMITHY_PROCESS_ID": process_id,
     }
-    try:
-        assets = await client.get_assets()
-    except Exception:
-        logger.warning("Could not fetch assets — running without SMITHY_ASSET_* vars")
-        return None
-    env.update(_asset_env_vars(assets))
-    return env
 
 
 # ------------------------------------------------------------------
@@ -254,9 +230,9 @@ async def execute_command(
                 requirements = _pack_requirements(requirements)
             await _deploy_process(client, executor, process_id, process_data, requirements)
 
-            # Run the process (cloud coordinates + assets ride in the env).
+            # Run the process (cloud coordinates + asset scoping ride in the env).
             # A pack is a flow, not code: the engine's runner executes it.
-            extra_env = await _run_env(client)
+            extra_env = await _run_env(client, process_id)
             if is_pack:
                 proc = await executor.run_flow(process_id, env=extra_env)
             else:
