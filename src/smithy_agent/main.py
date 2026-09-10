@@ -103,6 +103,47 @@ async def _run_env(client: OrchestratorClient) -> dict[str, str] | None:
 # Command execution
 # ------------------------------------------------------------------
 
+#: A pack ships flows, not Python dependencies — the engine must be present
+#: for the deployed ``main.py`` to import ``smithy``. Override via
+#: ``SMITHY_PACK_REQUIREMENT`` (empty string disables the injection).
+_DEFAULT_ENGINE_REQUIREMENT = "smithy-engine[windows]"
+
+
+def _pack_requirements(requirements: list[str]) -> list[str]:
+    """Ensure a pack run installs the smithy engine unless already covered."""
+    override = os.environ.get("SMITHY_PACK_REQUIREMENT")
+    if override is not None:
+        extra = override.strip()
+        if not extra:
+            return requirements
+    else:
+        extra = _DEFAULT_ENGINE_REQUIREMENT
+    if any("smithy" in req for req in requirements):
+        return requirements
+    return [*requirements, extra]
+
+
+def _is_pack_run(process_data: dict[str, Any]) -> bool:
+    """True when the command references a pinned pack (name + version)."""
+    pack = process_data.get("pack")
+    return isinstance(pack, dict) and bool(pack.get("name")) and bool(pack.get("version"))
+
+
+async def _deploy_process(
+    client: OrchestratorClient,
+    executor: ProcessExecutor,
+    process_id: str,
+    process_data: dict[str, Any],
+    requirements: list[str],
+) -> None:
+    """Materialize process code: a pinned pack zip, or inline files."""
+    if _is_pack_run(process_data):
+        pack = process_data["pack"]
+        data = await client.fetch_pack(str(pack["name"]), str(pack["version"]))
+        await executor.deploy(process_id, {}, requirements, pack_data=data)
+    else:
+        await executor.deploy(process_id, process_data.get("files", {}), requirements)
+
 
 async def execute_command(
     client: OrchestratorClient,
@@ -117,7 +158,13 @@ async def execute_command(
             "command": "run",
             "process_id": "...",
             "run_id": "...",
-            "process_data": {"files": {...}, "entry_point": "...", "requirements": [...]},
+            "process_data": {
+                "files": {...},
+                "entry_point": "...",
+                "requirements": [...],
+                # pack-based process: {"name": "01_notepad", "version": "1.0.1"}
+                "pack": {...},
+            },
         }
     """
     if _semaphore is None:
@@ -155,11 +202,10 @@ async def execute_command(
                         logger.exception("Deploy ack for process %s failed", process_id)
                 return
             try:
-                await executor.deploy(
-                    process_id,
-                    process_data.get("files", {}),
-                    process_data.get("requirements", []),
-                )
+                requirements = process_data.get("requirements", [])
+                if _is_pack_run(process_data):
+                    requirements = _pack_requirements(requirements)
+                await _deploy_process(client, executor, process_id, process_data, requirements)
                 if deployment_id is not None:
                     await client.ack_deployment(str(deployment_id), "deployed")
             except Exception as exc:
@@ -201,20 +247,24 @@ async def execute_command(
             # Report running state before doing any work
             await client.report_status(run_id, "running")
 
-            # Deploy files and set up venv
-            await executor.deploy(
-                process_id,
-                process_data.get("files", {}),
-                process_data.get("requirements", []),
-            )
+            # Deploy the pinned pack (or inline files) and set up the venv
+            is_pack = _is_pack_run(process_data)
+            requirements = process_data.get("requirements", [])
+            if is_pack:
+                requirements = _pack_requirements(requirements)
+            await _deploy_process(client, executor, process_id, process_data, requirements)
 
-            # Run the process (cloud coordinates + assets ride in the env)
+            # Run the process (cloud coordinates + assets ride in the env).
+            # A pack is a flow, not code: the engine's runner executes it.
             extra_env = await _run_env(client)
-            proc = await executor.run(
-                process_id,
-                process_data["entry_point"],
-                env=extra_env,
-            )
+            if is_pack:
+                proc = await executor.run_flow(process_id, env=extra_env)
+            else:
+                proc = await executor.run(
+                    process_id,
+                    process_data["entry_point"],
+                    env=extra_env,
+                )
 
             # Stream logs back to orchestrator
             streamer = LogStreamer(client, run_id)

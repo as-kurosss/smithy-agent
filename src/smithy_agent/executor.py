@@ -4,13 +4,27 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
+import json
 import logging
 import os
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
+import zipfile
 from pathlib import Path, PureWindowsPath
 
 logger = logging.getLogger(__name__)
+
+#: Pack delivery format — mirrors the engine's ``smithy.pack``.
+PACK_MANIFEST = "pack.json"
+PACK_SCHEMA = "smithy-pack-v1"
+_SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
+#: Tracks the files a pack deploy placed, so a re-deploy can drop stale ones.
+_PACK_MARKER = ".pack-files.json"
+
 
 # Console-less spawning: the agent runs under pythonw (no console). Console
 # children (the deployed process, pip, venv) would each open a flashing
@@ -39,6 +53,107 @@ def _check_rel_path(rel: str) -> None:
         raise ValueError(f"Refusing path outside process dir: {rel!r}")
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _safe_extract(data: bytes, dest: Path) -> None:
+    """Extract a pack zip into *dest*, rejecting unsafe member paths.
+
+    Mirrors the engine's zip-slip guard: absolute paths, Windows drive
+    letters and ``..`` segments are refused before anything is written.
+    """
+    root = dest.resolve()
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        for member in archive.infolist():
+            name = member.filename
+            if not name or name.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", name):
+                raise ValueError(f"Unsafe path in pack archive: {name!r}")
+            parts = [p for p in name.replace("\\", "/").split("/") if p not in ("", ".")]
+            if any(part == ".." for part in parts):
+                raise ValueError(f"Unsafe path in pack archive: {name!r}")
+            target = (root / Path(*parts)).resolve()
+            if not target.is_relative_to(root):
+                raise ValueError(f"Unsafe path in pack archive: {name!r}")
+        archive.extractall(dest)
+
+
+def _verify_pack(directory: Path) -> list[str]:
+    """Verify a pack's manifest in place; return the list of problems.
+
+    Empty list = intact. This repeats the engine's client-side check so a
+    tampered archive is rejected before any process code runs.
+    """
+    manifest_path = directory / PACK_MANIFEST
+    if not manifest_path.is_file():
+        return [f"no {PACK_MANIFEST} — not a smithy pack"]
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"manifest is unreadable: {exc}"]
+    if not isinstance(manifest, dict) or manifest.get("schema") != PACK_SCHEMA:
+        schema = manifest.get("schema") if isinstance(manifest, dict) else None
+        return [f"unknown manifest schema: {schema!r}"]
+
+    problems: list[str] = []
+    files = [item for item in (manifest.get("files") or []) if isinstance(item, dict)]
+    if not files:
+        problems.append("manifest lists no files")
+    for item in files:
+        rel = str(item.get("path") or "")
+        checksum = str(item.get("sha256") or "")
+        if not rel or not _SHA256_RE.match(checksum):
+            problems.append(f"manifest entry {rel!r}: bad path or sha256")
+            continue
+        file_path = directory / rel
+        if not file_path.is_file():
+            problems.append(f"listed file is missing: {rel}")
+        elif _sha256_file(file_path) != checksum:
+            problems.append(f"checksum mismatch: {rel}")
+    return problems
+
+
+def _flow_run_args(proc_dir: Path) -> list[str]:
+    """Arguments for ``python -m smithy.run_flow`` selecting the pack's flow.
+
+    Prefers a manifest entry stage (``--pack DIR --stage NAME`` so the
+    engine also picks up ``tools.py``/``selectors.json``); falls back to the
+    conventional ``*_flow.json`` / ``*.flow.json`` member. Raises
+    :class:`ValueError` when the pack carries no flow at all.
+    """
+    entry: dict[str, str] = {}
+    manifest_path = proc_dir / PACK_MANIFEST
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+        if isinstance(manifest, dict) and isinstance(manifest.get("entry"), dict):
+            entry = {str(stage): str(path) for stage, path in manifest["entry"].items()}
+    for stage in ("process", "init", "end", *entry):
+        flow = entry.get(stage)
+        if flow and (proc_dir / flow).is_file():
+            return ["--pack", str(proc_dir), "--stage", stage]
+
+    flows = sorted(
+        path.name
+        for path in proc_dir.iterdir()
+        if path.is_file()
+        and path.name != PACK_MANIFEST
+        and (path.name.endswith(".flow.json") or path.name.endswith("_flow.json"))
+    )
+    if not flows:
+        raise ValueError(f"pack has no flow file in {proc_dir}")
+    args = [flows[0]]
+    if (proc_dir / "tools.py").is_file():
+        args += ["--tools", "tools.py"]
+    return args
+
+
 class ProcessExecutor:
     """Manages deployed processes on the local machine."""
 
@@ -59,6 +174,8 @@ class ProcessExecutor:
         process_id: str,
         files: dict[str, str],
         requirements: list[str],
+        *,
+        pack_data: bytes | None = None,
     ) -> Path:
         """Write process files to disk and create/update a virtual environment.
 
@@ -67,9 +184,13 @@ class ProcessExecutor:
         process_id:
             Unique identifier for the process.
         files:
-            Mapping of relative file paths to their contents.
+            Mapping of relative file paths to their contents. Ignored when
+            *pack_data* is given (a pack carries its own file set).
         requirements:
             List of pip requirement strings.
+        pack_data:
+            Raw zip of a pinned pack version; when supplied it is verified
+            and extracted into the process dir instead of *files*.
 
         Returns
         -------
@@ -80,17 +201,10 @@ class ProcessExecutor:
         proc_dir.mkdir(parents=True, exist_ok=True)
         logger.info("Deploying process %s to %s", process_id, proc_dir)
 
-        # Write source files (reject paths escaping the process directory)
-        base = proc_dir.resolve()
-        for rel_path, content in files.items():
-            _check_rel_path(rel_path)
-            candidate = Path(rel_path)
-            file_path = (base / candidate).resolve()
-            if file_path != base and base not in file_path.parents:
-                raise ValueError(f"Refusing to write outside process dir: {rel_path!r}")
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_text(content, encoding="utf-8")
-            logger.debug("  wrote %s (%d bytes)", rel_path, len(content))
+        if pack_data is not None:
+            self._install_pack(process_id, proc_dir, pack_data)
+        else:
+            self._write_files(proc_dir, files)
 
         # Write requirements.txt
         req_path = proc_dir / "requirements.txt"
@@ -149,6 +263,74 @@ class ProcessExecutor:
         return proc_dir
 
     # ------------------------------------------------------------------
+    # Deploy internals
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _write_files(proc_dir: Path, files: dict[str, str]) -> None:
+        """Write source files, rejecting paths escaping the process dir."""
+        base = proc_dir.resolve()
+        for rel_path, content in files.items():
+            _check_rel_path(rel_path)
+            candidate = Path(rel_path)
+            file_path = (base / candidate).resolve()
+            if file_path != base and base not in file_path.parents:
+                raise ValueError(f"Refusing to write outside process dir: {rel_path!r}")
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8")
+            logger.debug("  wrote %s (%d bytes)", rel_path, len(content))
+
+    def _install_pack(self, process_id: str, proc_dir: Path, pack_data: bytes) -> None:
+        """Verify and extract a pack zip into *proc_dir*.
+
+        Extraction happens in a scratch dir first so a tampered archive is
+        rejected (manifest checksum mismatch, zip-slip) before it can touch
+        the deployed process. Files a previous pack deploy left behind are
+        removed, so a version rollback does not keep stale sources.
+        """
+        scratch = Path(tempfile.mkdtemp(dir=self.processes_dir, prefix=f".{process_id}.pack-"))
+        try:
+            _safe_extract(pack_data, scratch)
+            problems = _verify_pack(scratch)
+            if problems:
+                raise ValueError("pack failed verification: " + "; ".join(problems))
+            self._remove_previous_pack_files(proc_dir)
+            for item in scratch.iterdir():
+                target = proc_dir / item.name
+                if item.is_dir():
+                    shutil.copytree(item, target, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(item, target)
+            placed = sorted(
+                path.relative_to(scratch).as_posix()
+                for path in scratch.rglob("*")
+                if path.is_file()
+            )
+            (proc_dir / _PACK_MARKER).write_text(json.dumps(placed), encoding="utf-8")
+            logger.info("Installed pack for %s (%d files)", process_id, len(placed))
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+    @staticmethod
+    def _remove_previous_pack_files(proc_dir: Path) -> None:
+        marker = proc_dir / _PACK_MARKER
+        try:
+            listed = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        base = proc_dir.resolve()
+        for rel in listed if isinstance(listed, list) else []:
+            if not isinstance(rel, str):
+                continue
+            try:
+                _check_rel_path(rel)
+            except ValueError:
+                continue
+            target = (base / rel).resolve()
+            if target.is_relative_to(base) and target.is_file():
+                target.unlink()
+
+    # ------------------------------------------------------------------
     # Run
     # ------------------------------------------------------------------
 
@@ -189,16 +371,48 @@ class ProcessExecutor:
             Handle to the running subprocess.
         """
         proc_dir = self.processes_dir / process_id
-        python_exe = proc_dir / ".venv" / "Scripts" / "python.exe"
-        if not python_exe.exists():
-            # Non-Windows fallback
-            python_exe = proc_dir / ".venv" / "bin" / "python"
-
         entry = self._resolve_entry(proc_dir, entry_point)
         if not entry.is_file():
             raise FileNotFoundError(f"Entry point {entry_point!r} not found in {proc_dir}")
 
+        python_exe = self._venv_python(proc_dir)
         logger.info("Running process %s: %s %s", process_id, python_exe, entry)
+        return await self._spawn(process_id, [str(python_exe), str(entry)], proc_dir, env)
+
+    async def run_flow(
+        self,
+        process_id: str,
+        *,
+        env: dict[str, str] | None = None,
+    ) -> asyncio.subprocess.Process:
+        """Run a pack's flow with the engine (``python -m smithy.run_flow``).
+
+        Pack processes are flows, not arbitrary code: nothing from the pack
+        is executed directly — the engine's runner only dispatches
+        registered tools. The working directory is the process dir so the
+        engine finds ``selectors.json`` (and ``tools.py``).
+        """
+        proc_dir = self.processes_dir / process_id
+        args = _flow_run_args(proc_dir)
+        python_exe = self._venv_python(proc_dir)
+        logger.info(
+            "Running pack flow %s: %s -m smithy.run_flow %s",
+            process_id,
+            python_exe,
+            " ".join(args),
+        )
+        return await self._spawn(
+            process_id, [str(python_exe), "-m", "smithy.run_flow", *args], proc_dir, env
+        )
+
+    async def _spawn(
+        self,
+        process_id: str,
+        argv: list[str],
+        proc_dir: Path,
+        env: dict[str, str] | None,
+    ) -> asyncio.subprocess.Process:
+        """Spawn a child in *proc_dir* piping output; track it for stop()."""
         # Force UTF-8 stdout/stderr so non-ASCII output (—, кириллица, …)
         # survives the pipe regardless of the Windows locale codepage.
         child_env = {
@@ -209,8 +423,7 @@ class ProcessExecutor:
         if env:
             child_env.update(env)
         proc = await asyncio.create_subprocess_exec(
-            str(python_exe),
-            str(entry),
+            *argv,
             cwd=str(proc_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -219,6 +432,14 @@ class ProcessExecutor:
         )
         self._processes[process_id] = proc
         return proc
+
+    @staticmethod
+    def _venv_python(proc_dir: Path) -> Path:
+        python_exe = proc_dir / ".venv" / "Scripts" / "python.exe"
+        if not python_exe.exists():
+            # Non-Windows fallback
+            python_exe = proc_dir / ".venv" / "bin" / "python"
+        return python_exe
 
     # ------------------------------------------------------------------
     # Stop

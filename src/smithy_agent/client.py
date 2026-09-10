@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import urllib.parse
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -158,6 +159,28 @@ class OrchestratorClient:
             resp = await self._get(f"/api/agents/{self._agent_id}/assets")
         resp.raise_for_status()
         return cast(list[dict[str, Any]], resp.json())
+
+    # ------------------------------------------------------------------
+    # Packs (bot delivery units)
+    # ------------------------------------------------------------------
+
+    async def fetch_pack(self, name: str, version: str) -> bytes:
+        """Download a pinned pack zip from the orchestrator.
+
+        Cut, byte-identical ``GET /api/packs/{name}/versions/{version}.zip``;
+        the agent secret authenticates the request (agents are pack-readable).
+        Returns the raw archive — extraction and manifest verification happen
+        in :class:`~smithy_agent.executor.ProcessExecutor`.
+        """
+        quoted_name = urllib.parse.quote(name, safe="")
+        quoted_version = urllib.parse.quote(version, safe="")
+        path = f"/api/packs/{quoted_name}/versions/{quoted_version}.zip"
+        resp = await self._get(path)
+        if resp.status_code == 401:
+            await self._re_authenticate()
+            resp = await self._get(path)
+        resp.raise_for_status()
+        return resp.content
 
     # ------------------------------------------------------------------
     # Polling
