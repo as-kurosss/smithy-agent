@@ -1,6 +1,6 @@
 """Agent configuration file: everything the service needs to (re)start.
 
-Stored at ``%LOCALAPPDATA%\\smithy_agent\\config.json`` (per-user: the agent
+Stored at ``%LOCALAPPDATA%\\smithcore_agent\\config.json`` (per-user: the agent
 runs inside the user's interactive session, which UI automation requires).
 """
 
@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "smithy_agent"
+CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "smithcore_agent"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
 DEFAULT_AGENT_PORT = 8001

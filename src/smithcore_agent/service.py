@@ -21,11 +21,11 @@ import sys
 import time
 from pathlib import Path
 
-from smithy_agent.config import CONFIG_PATH, load_config, save_config
+from smithcore_agent.config import CONFIG_PATH, load_config, save_config
 
-logger = logging.getLogger("smithy_agent")
+logger = logging.getLogger("smithcore_agent")
 
-TASK_NAME = "SmithyAgent"
+TASK_NAME = "SmithcoreAgent"
 _RESTART_BACKOFF_START_S = 5.0
 _RESTART_BACKOFF_MAX_S = 60.0
 
@@ -60,12 +60,12 @@ def _configure_logging(log_path: Path, level: int) -> None:
 
 def run_forever() -> None:
     """Start the agent and restart it after any exit (crash-restart loop)."""
-    from smithy_agent.main import run_agent
+    from smithcore_agent.main import run_agent
 
     cfg = load_config()
     if not cfg.get("orchestrator_url"):
         print(
-            f"No agent config at {CONFIG_PATH} — run `smithy-agent-service install` first",
+            f"No agent config at {CONFIG_PATH} — run `smithcore-agent-service install` first",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -144,7 +144,7 @@ def task_command(
         python_exe = str(windowless)
     parts = [
         "$action = New-ScheduledTaskAction -Execute "
-        f"{_ps_quote(python_exe)} -Argument '-m smithy_agent.service run' "
+        f"{_ps_quote(python_exe)} -Argument '-m smithcore_agent.service run' "
         f"-WorkingDirectory {_ps_quote(str(Path.home()))}",
         f"$trigger = New-ScheduledTaskTrigger -AtLogOn -User {_ps_quote(user)}"
         if user
@@ -209,7 +209,7 @@ def uninstall_task() -> bool:
 
 
 def update_package() -> bool:
-    """Upgrade smithy-agent in the current venv and restart the task.
+    """Upgrade smithcore-agent in the current venv and restart the task.
 
     The running agent keeps the old code until it restarts, so the task is
     bounced right after a successful upgrade (the crash-restart loop and
@@ -217,9 +217,9 @@ def update_package() -> bool:
     """
     import subprocess as sp
 
-    from smithy_agent.client import agent_version
+    from smithcore_agent.client import agent_version
 
-    print(f"Upgrading smithy-agent (interpreter: {sys.executable})...")
+    print(f"Upgrading smithcore-agent (interpreter: {sys.executable})...")
     before = agent_version()
     proc = sp.run(
         [
@@ -231,7 +231,7 @@ def update_package() -> bool:
             # Bypass the local HTTP cache: the index page may be up to
             # ~10 min stale after a release, which would no-op the upgrade.
             "--no-cache-dir",
-            "smithy-agent[screenshot]",
+            "smithcore-agent[screenshot]",
         ]
     )
     if proc.returncode != 0:
@@ -246,7 +246,9 @@ def update_package() -> bool:
     stop_task()
     if not start_task():
         print(
-            "Task restart failed — start it manually: smithy-agent-service start", file=sys.stderr
+            "Task restart failed — start it manually: "
+            "smithcore-agent-service start",
+            file=sys.stderr,
         )
         return False
     print("Done.")
@@ -280,14 +282,14 @@ def task_status() -> str:
         if cfg.get("agent_url"):
             lines.append(f"url:     {cfg['agent_url']}")
     else:
-        lines.append("agent:   (no config - run `smithy-agent-service install`)")
+        lines.append("agent:   (no config - run `smithcore-agent-service install`)")
 
     # Running interpreter (venv pythonw spawns the real pythonw as a child:
     # both share the command line, so one match is enough).
     try:
         res = _run_powershell(
             "(Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' AND "
-            "CommandLine LIKE '%smithy_agent.service%'\" "
+            "CommandLine LIKE '%smithcore_agent.service%'\" "
             "| Select-Object -First 1 -ExpandProperty ProcessId)"
         )
         pid = res.stdout.decode(errors="replace").strip()
@@ -306,7 +308,7 @@ def task_status() -> str:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="smithy-agent-service",
+        prog="smithcore-agent-service",
         description="Unattended agent runner: crash-restart loop + task management.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -323,7 +325,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("start", help="start the task now")
     sub.add_parser("stop", help="stop the task")
     sub.add_parser("status", help="show the task state")
-    sub.add_parser("update", help="upgrade smithy-agent from PyPI and restart the task")
+    sub.add_parser("update", help="upgrade smithcore-agent from PyPI and restart the task")
 
     args = parser.parse_args(argv)
 
@@ -337,7 +339,7 @@ def main(argv: list[str] | None = None) -> None:
         if install_task(args.user):
             print(f"Config written: {path}")
             print(f"Scheduled task '{TASK_NAME}' installed")
-            print("Start it now with: smithy-agent-service start")
+            print("Start it now with: smithcore-agent-service start")
             print("Note: the task runs at log on — use a dedicated auto-logon user")
             print("      so UI automation always has an interactive desktop.")
         else:
@@ -362,13 +364,13 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _auto_url(orchestrator_url: str) -> str:
-    from smithy_agent.config import agent_url_for
+    from smithcore_agent.config import agent_url_for
 
     return agent_url_for(orchestrator_url)
 
 
 def _write_config(orchestrator_url: str, name: str, url: str, join_token: str | None) -> Path:
-    from smithy_agent.config import save_config
+    from smithcore_agent.config import save_config
 
     return save_config(orchestrator_url, name, url, join_token)
 

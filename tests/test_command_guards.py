@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from smithy_agent import main as agent_main
+from smithcore_agent import main as agent_main
 
 
 class FakeClient:

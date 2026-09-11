@@ -12,9 +12,9 @@ from typing import Any
 import httpx
 import pytest
 
-from smithy_agent import main as agent_main
-from smithy_agent.client import OrchestratorClient
-from smithy_agent.executor import (
+from smithcore_agent import main as agent_main
+from smithcore_agent.client import OrchestratorClient
+from smithcore_agent.executor import (
     ProcessExecutor,
     _flow_run_args,
     _safe_extract,
@@ -26,7 +26,7 @@ def make_pack_zip(
     files: dict[str, bytes], *, name: str = "01_notepad", version: str = "1.0.0"
 ) -> bytes:
     manifest = {
-        "schema": "smithy-pack-v1",
+        "schema": "smithcore-pack-v1",
         "name": name,
         "version": version,
         "entry": {},
@@ -78,12 +78,12 @@ async def test_deploy_pack_extracts_and_drops_stale_files(
     process_id = "123e4567-e89b-12d3-a456-426614174000"
 
     first = make_pack_zip({"main.py": b"print('v1')", "old.py": b"old"})
-    proc_dir = await executor.deploy(process_id, {}, ["smithy-engine"], pack_data=first)
+    proc_dir = await executor.deploy(process_id, {}, ["smithcore-engine"], pack_data=first)
     assert (proc_dir / "main.py").read_text(encoding="utf-8") == "print('v1')"
     assert (proc_dir / "old.py").exists()
 
     second = make_pack_zip({"main.py": b"print('v2')"})
-    await executor.deploy(process_id, {}, ["smithy-engine"], pack_data=second)
+    await executor.deploy(process_id, {}, ["smithcore-engine"], pack_data=second)
     assert (proc_dir / "main.py").read_text(encoding="utf-8") == "print('v2')"
     assert not (proc_dir / "old.py").exists()
 
@@ -115,17 +115,17 @@ async def test_deploy_pack_rejects_tampered_archive(
 
 
 def test_pack_requirements_injects_engine(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("SMITHY_PACK_REQUIREMENT", raising=False)
-    assert agent_main._pack_requirements([]) == ["smithy-engine[windows]"]
-    assert agent_main._pack_requirements(["smithy-engine"]) == ["smithy-engine"]
-    assert agent_main._pack_requirements(["requests"]) == ["requests", "smithy-engine[windows]"]
+    monkeypatch.delenv("SMITHCORE_PACK_REQUIREMENT", raising=False)
+    assert agent_main._pack_requirements([]) == ["smithcore-engine[windows]"]
+    assert agent_main._pack_requirements(["smithcore-engine"]) == ["smithcore-engine"]
+    assert agent_main._pack_requirements(["requests"]) == ["requests", "smithcore-engine[windows]"]
 
 
 def test_pack_requirements_respects_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SMITHY_PACK_REQUIREMENT", "")
+    monkeypatch.setenv("SMITHCORE_PACK_REQUIREMENT", "")
     assert agent_main._pack_requirements([]) == []
-    monkeypatch.setenv("SMITHY_PACK_REQUIREMENT", "smithy-engine==0.8.4")
-    assert agent_main._pack_requirements(["requests"]) == ["requests", "smithy-engine==0.8.4"]
+    monkeypatch.setenv("SMITHCORE_PACK_REQUIREMENT", "smithcore-engine==0.8.4")
+    assert agent_main._pack_requirements(["requests"]) == ["requests", "smithcore-engine==0.8.4"]
 
 
 def test_is_pack_run_requires_name_and_version() -> None:
@@ -175,7 +175,7 @@ async def test_run_flow_invokes_engine_runner(
 
     monkeypatch.setattr(executor, "_spawn", fake_spawn)
     await executor.run_flow("p1")
-    assert captured["argv"][1:] == ["-m", "smithy.run_flow", "01_notepad_flow.json"]
+    assert captured["argv"][1:] == ["-m", "smithcore.run_flow", "01_notepad_flow.json"]
     assert captured["cwd"] == proc_dir
 
 
@@ -201,7 +201,7 @@ async def test_deploy_process_fetches_pinned_pack() -> None:
         executor,
         "p1",
         {"pack": {"name": "01_notepad", "version": "1.0.1"}},
-        ["smithy-engine[windows]"],
+        ["smithcore-engine[windows]"],
     )
     assert client.fetched == [("01_notepad", "1.0.1")]
     assert executor.calls[0][0] == "p1"

@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-import smithy_agent.screenshot as shot
+import smithcore_agent.screenshot as shot
 
 
 def test_non_windows_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:

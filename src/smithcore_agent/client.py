@@ -1,4 +1,4 @@
-"""HTTP client for communicating with the Smithy orchestrator."""
+"""HTTP client for communicating with the Smithcore orchestrator."""
 
 from __future__ import annotations
 
@@ -34,22 +34,22 @@ def _redact_for_log(text: str, *, limit: int = 500) -> str:
 
 
 def agent_version() -> str:
-    """Installed smithy-agent version, "unknown" when not resolvable."""
+    """Installed smithcore-agent version, "unknown" when not resolvable."""
     try:
-        return _pkg_version("smithy-agent")
+        return _pkg_version("smithcore-agent")
     except PackageNotFoundError:
         return "unknown"
 
 
 def engine_version() -> str | None:
-    """Installed smithy-engine version (None when not in this venv).
+    """Installed smithcore-engine version (None when not in this venv).
 
     The engine rides in the *deployed process* venv, not the agent's own;
-    this reports whatever ``smithy`` is importable from the agent venv —
+    this reports whatever ``smithcore`` is importable from the agent venv —
     good enough for fleet monitoring until per-run stamping lands.
     """
     try:
-        return _pkg_version("smithy")
+        return _pkg_version("smithcore")
     except PackageNotFoundError:
         return None
 
@@ -183,7 +183,7 @@ class OrchestratorClient:
         Cut, byte-identical ``GET /api/packs/{name}/versions/{version}.zip``;
         the agent secret authenticates the request (agents are pack-readable).
         Returns the raw archive — extraction and manifest verification happen
-        in :class:`~smithy_agent.executor.ProcessExecutor`.
+        in :class:`~smithcore_agent.executor.ProcessExecutor`.
         """
         quoted_name = urllib.parse.quote(name, safe="")
         quoted_version = urllib.parse.quote(version, safe="")

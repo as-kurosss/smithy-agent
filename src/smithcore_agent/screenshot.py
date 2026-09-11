@@ -30,7 +30,7 @@ def capture_screenshot() -> tuple[bytes, str] | None:
         import mss
         from PIL import Image
     except ImportError:
-        logger.info("Screenshot skipped: install smithy-agent[screenshot] to enable")
+        logger.info("Screenshot skipped: install smithcore-agent[screenshot] to enable")
         return None
 
     try:

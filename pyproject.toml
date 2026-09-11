@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "smithy-agent"
+name = "smithcore-agent"
 version = "0.3.2"
-description = "Smithy RPA agent - runs on Windows machines and executes processes dispatched by a smithy-cloud orchestrator"
+description = "Smithcore RPA agent - runs on Windows machines and executes processes dispatched by a smithcore-cloud orchestrator"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -28,16 +28,16 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/as-kurosss/smithy-agent"
-Repository = "https://github.com/as-kurosss/smithy-agent"
-Issues = "https://github.com/as-kurosss/smithy-agent/issues"
+Homepage = "https://github.com/as-kurosss/smithcore-agent"
+Repository = "https://github.com/as-kurosss/smithcore-agent"
+Issues = "https://github.com/as-kurosss/smithcore-agent/issues"
 
 [project.scripts]
-smithy-agent = "smithy_agent.main:main"
-smithy-agent-service = "smithy_agent.service:main"
+smithcore-agent = "smithcore_agent.main:main"
+smithcore-agent-service = "smithcore_agent.service:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/smithy_agent"]
+packages = ["src/smithcore_agent"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

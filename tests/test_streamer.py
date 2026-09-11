@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from smithy_agent.streamer import LogStreamer
+from smithcore_agent.streamer import LogStreamer
 
 
 def test_parse_structured_line_lowercases_level() -> None:

@@ -1,8 +1,8 @@
-"""Entry point for the Smithy agent.
+"""Entry point for the Smithcore agent.
 
 Run with::
 
-    smithy-agent --orchestrator http://localhost:8000 --name my-agent --url http://localhost:8001
+    smithcore-agent --orchestrator http://localhost:8000 --name my-agent --url http://localhost:8001
 """
 
 from __future__ import annotations
@@ -20,16 +20,16 @@ from typing import Any
 
 from rich.console import Console
 
-from smithy_agent.client import (
+from smithcore_agent.client import (
     HEARTBEAT_INTERVAL_SECONDS,
     POLL_INTERVAL_SECONDS,
     OrchestratorClient,
     agent_version,
 )
-from smithy_agent.executor import ProcessExecutor
-from smithy_agent.streamer import LogStreamer
+from smithcore_agent.executor import ProcessExecutor
+from smithcore_agent.streamer import LogStreamer
 
-logger = logging.getLogger("smithy_agent")
+logger = logging.getLogger("smithcore_agent")
 console = Console()
 
 _running_tasks: set[asyncio.Task[None]] = set()
@@ -67,17 +67,17 @@ async def _run_env(client: OrchestratorClient, process_id: str) -> dict[str, str
     (``HttpAssetProvider``), scoped to *process_id* so a flow can only read
     the assets its process is allowed.
 
-    NOTE: ``SMITHY_AGENT_TOKEN`` is the agent credential — deployed process
+    NOTE: ``SMITHCORE_AGENT_TOKEN`` is the agent credential — deployed process
     code is trusted to the same degree as the agent itself. Do not run
     unreviewed third-party flows with production credentials; scope assets
     per process server-side.
     """
     return {
-        "SMITHY_ORCHESTRATOR_URL": client.orchestrator_url,
-        "SMITHY_AGENT_ID": client.agent_id or "",
-        "SMITHY_AGENT_TOKEN": client.agent_secret or "",
-        "SMITHY_AGENT_VERSION": agent_version(),
-        "SMITHY_PROCESS_ID": process_id,
+        "SMITHCORE_ORCHESTRATOR_URL": client.orchestrator_url,
+        "SMITHCORE_AGENT_ID": client.agent_id or "",
+        "SMITHCORE_AGENT_TOKEN": client.agent_secret or "",
+        "SMITHCORE_AGENT_VERSION": agent_version(),
+        "SMITHCORE_PROCESS_ID": process_id,
     }
 
 
@@ -86,21 +86,21 @@ async def _run_env(client: OrchestratorClient, process_id: str) -> dict[str, str
 # ------------------------------------------------------------------
 
 #: A pack ships flows, not Python dependencies — the engine must be present
-#: for the deployed ``main.py`` to import ``smithy``. Override via
-#: ``SMITHY_PACK_REQUIREMENT`` (empty string disables the injection).
-_DEFAULT_ENGINE_REQUIREMENT = "smithy-engine[windows]"
+#: for the deployed ``main.py`` to import ``smithcore``. Override via
+#: ``SMITHCORE_PACK_REQUIREMENT`` (empty string disables the injection).
+_DEFAULT_ENGINE_REQUIREMENT = "smithcore-engine[windows]"
 
 
 def _pack_requirements(requirements: list[str]) -> list[str]:
-    """Ensure a pack run installs the smithy engine unless already covered."""
-    override = os.environ.get("SMITHY_PACK_REQUIREMENT")
+    """Ensure a pack run installs the smithcore engine unless already covered."""
+    override = os.environ.get("SMITHCORE_PACK_REQUIREMENT")
     if override is not None:
         extra = override.strip()
         if not extra:
             return requirements
     else:
         extra = _DEFAULT_ENGINE_REQUIREMENT
-    if any("smithy" in req for req in requirements):
+    if any("smithcore" in req for req in requirements):
         return requirements
     return [*requirements, extra]
 
@@ -286,18 +286,18 @@ async def execute_command(
 async def _attach_failure_screenshot(client: OrchestratorClient, run_id: str) -> None:
     """Best-effort screenshot on failure: must never mask the real error.
 
-    Opt-out via ``SMITHY_SCREENSHOT_ON_FAILURE=0``: screenshots capture the
+    Opt-out via ``SMITHCORE_SCREENSHOT_ON_FAILURE=0``: screenshots capture the
     whole virtual desktop and may contain passwords/PII.
     """
     import os as _os
 
-    if _os.environ.get("SMITHY_SCREENSHOT_ON_FAILURE", "1").strip().lower() in (
+    if _os.environ.get("SMITHCORE_SCREENSHOT_ON_FAILURE", "1").strip().lower() in (
         "0",
         "false",
         "no",
     ):
         return
-    from smithy_agent.screenshot import capture_screenshot
+    from smithcore_agent.screenshot import capture_screenshot
 
     try:
         shot = capture_screenshot()
@@ -334,7 +334,7 @@ async def run_agent(
     global _semaphore
     _semaphore = asyncio.Semaphore(_MAX_CONCURRENT_RUNS)
 
-    from smithy_agent.config import check_orchestrator_url
+    from smithcore_agent.config import check_orchestrator_url
 
     try:
         check_orchestrator_url(orchestrator_url)
@@ -345,12 +345,12 @@ async def run_agent(
         orchestrator_url,
         agent_name,
         agent_url,
-        join_token=join_token or os.environ.get("SMITHY_JOIN_TOKEN"),
+        join_token=join_token or os.environ.get("SMITHCORE_JOIN_TOKEN"),
         agent_id=agent_id,
         agent_secret=agent_secret,
         on_credentials=on_credentials,
     )
-    executor = ProcessExecutor(Path.home() / ".smithy-agent")
+    executor = ProcessExecutor(Path.home() / ".smithcore-agent")
 
     try:
         if client.agent_id and client._secret:
@@ -401,8 +401,8 @@ async def run_agent(
 def main() -> None:
     """Parse CLI arguments and start the agent."""
     parser = argparse.ArgumentParser(
-        prog="smithy-agent",
-        description="Smithy Cloud agent — communicates with the orchestrator.",
+        prog="smithcore-agent",
+        description="Smithcore Cloud agent — communicates with the orchestrator.",
     )
     parser.add_argument(
         "--orchestrator",
@@ -422,7 +422,7 @@ def main() -> None:
     parser.add_argument(
         "--join-token",
         default=None,
-        help="Join token for auth-on orchestrators (or SMITHY_JOIN_TOKEN).",
+        help="Join token for auth-on orchestrators (or SMITHCORE_JOIN_TOKEN).",
     )
     parser.add_argument(
         "--log-level",

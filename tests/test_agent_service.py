@@ -8,10 +8,10 @@ import pytest
 
 
 def test_task_command_defaults() -> None:
-    from smithy_agent.service import TASK_NAME, task_command
+    from smithcore_agent.service import TASK_NAME, task_command
 
     cmd = task_command("C:/py/python.exe")
-    assert "-m smithy_agent.service run" in cmd
+    assert "-m smithcore_agent.service run" in cmd
     assert "New-ScheduledTaskTrigger -AtLogOn" in cmd
     assert f"'{TASK_NAME}'" in cmd
     assert "RestartCount 999" in cmd
@@ -20,7 +20,7 @@ def test_task_command_defaults() -> None:
 
 
 def test_task_command_prefers_pythonw(tmp_path: Path) -> None:
-    from smithy_agent.service import task_command
+    from smithcore_agent.service import task_command
 
     py = tmp_path / "python.exe"
     pyw = tmp_path / "pythonw.exe"
@@ -31,7 +31,7 @@ def test_task_command_prefers_pythonw(tmp_path: Path) -> None:
 
 
 def test_task_command_with_user() -> None:
-    from smithy_agent.service import task_command
+    from smithcore_agent.service import task_command
 
     cmd = task_command("C:/py/python.exe", user="WORKBOX\\rpa")
     assert "New-ScheduledTaskTrigger -AtLogOn -User 'WORKBOX\\rpa'" in cmd
@@ -40,7 +40,7 @@ def test_task_command_with_user() -> None:
 
 
 def test_config_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import smithy_agent.config as cfg
+    import smithcore_agent.config as cfg
 
     monkeypatch.setattr(cfg, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(cfg, "CONFIG_PATH", tmp_path / "config.json")
@@ -62,8 +62,8 @@ def test_missing_config_fails_service_start(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    import smithy_agent.config as cfg
-    import smithy_agent.service as svc
+    import smithcore_agent.config as cfg
+    import smithcore_agent.service as svc
 
     monkeypatch.setattr(cfg, "CONFIG_PATH", tmp_path / "config.json")
     with pytest.raises(SystemExit) as exc:

@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from smithy_agent.executor import ProcessExecutor
+from smithcore_agent.executor import ProcessExecutor
 
 
 @pytest.mark.parametrize(

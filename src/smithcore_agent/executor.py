@@ -18,9 +18,9 @@ from pathlib import Path, PureWindowsPath
 
 logger = logging.getLogger(__name__)
 
-#: Pack delivery format — mirrors the engine's ``smithy.pack``.
+#: Pack delivery format — mirrors the engine's ``smithcore.pack``.
 PACK_MANIFEST = "pack.json"
-PACK_SCHEMA = "smithy-pack-v1"
+PACK_SCHEMA = "smithcore-pack-v1"
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 #: Tracks the files a pack deploy placed, so a re-deploy can drop stale ones.
 _PACK_MARKER = ".pack-files.json"
@@ -119,7 +119,7 @@ def _verify_pack(directory: Path) -> list[str]:
     """
     manifest_path = directory / PACK_MANIFEST
     if not manifest_path.is_file():
-        return [f"no {PACK_MANIFEST} — not a smithy pack"]
+        return [f"no {PACK_MANIFEST} — not a smithcore pack"]
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -147,7 +147,7 @@ def _verify_pack(directory: Path) -> list[str]:
 
 
 def _flow_run_args(proc_dir: Path) -> list[str]:
-    """Arguments for ``python -m smithy.run_flow`` selecting the pack's flow.
+    """Arguments for ``python -m smithcore.run_flow`` selecting the pack's flow.
 
     Prefers a manifest entry stage (``--pack DIR --stage NAME`` so the
     engine also picks up ``tools.py``/``selectors.json``); falls back to the
@@ -396,7 +396,7 @@ class ProcessExecutor:
         entry_point:
             Relative path to the Python entry point, e.g. ``main.py``.
         env:
-            Extra environment entries (cloud coordinates, ``SMITHY_ASSET_*``
+            Extra environment entries (cloud coordinates, ``SMITHCORE_ASSET_*``
             credentials) merged over ``os.environ``. ``None`` keeps the
             plain base environment.
 
@@ -420,7 +420,7 @@ class ProcessExecutor:
         *,
         env: dict[str, str] | None = None,
     ) -> asyncio.subprocess.Process:
-        """Run a pack's flow with the engine (``python -m smithy.run_flow``).
+        """Run a pack's flow with the engine (``python -m smithcore.run_flow``).
 
         Pack processes are flows, not arbitrary code: nothing from the pack
         is executed directly — the engine's runner only dispatches
@@ -431,13 +431,13 @@ class ProcessExecutor:
         args = _flow_run_args(proc_dir)
         python_exe = self._venv_python(proc_dir)
         logger.info(
-            "Running pack flow %s: %s -m smithy.run_flow %s",
+            "Running pack flow %s: %s -m smithcore.run_flow %s",
             process_id,
             python_exe,
             " ".join(args),
         )
         return await self._spawn(
-            process_id, [str(python_exe), "-m", "smithy.run_flow", *args], proc_dir, env
+            process_id, [str(python_exe), "-m", "smithcore.run_flow", *args], proc_dir, env
         )
 
     async def _spawn(

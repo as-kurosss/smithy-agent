@@ -37,7 +37,7 @@ jobs:
           python-version: "3.14"
       - run: uv pip install --system -e ".[dev]"
       - name: Mypy
-        run: mypy src/smithy_agent
+        run: mypy src/smithcore_agent
 
   test:
     strategy:

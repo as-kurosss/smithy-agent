@@ -1,7 +1,7 @@
-# smithy-agent
+# smithcore-agent
 
 Unattended worker that runs on a Windows machine, registers itself with a
-[smithy-cloud](https://github.com/as-kurosss/smithy-cloud) orchestrator,
+[smithcore-cloud](https://github.com/as-kurosss/smithcore-cloud) orchestrator,
 polls it for commands, and executes deployed process bundles (Python code)
 in isolated per-process venvs.
 
@@ -11,28 +11,28 @@ Regular PowerShell (it self-elevates and installs Python 3.12 via winget if
 missing):
 
 ```powershell
-irm https://raw.githubusercontent.com/as-kurosss/smithy-agent/master/install-agent.ps1 | iex
+irm https://raw.githubusercontent.com/as-kurosss/smithcore-agent/master/install-agent.ps1 | iex
 ```
 
 With parameters:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/as-kurosss/smithy-agent/master/install-agent.ps1))) `
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/as-kurosss/smithcore-agent/master/install-agent.ps1))) `
     -Orchestrator https://cloud.example.com -Name prod-1 -JoinToken <TOKEN>
 ```
 
 ## Manual install
 
 ```bash
-pip install smithy-agent
+pip install smithcore-agent
 ```
 
 
 ## Quick start (manual, foreground)
 
 ```bash
-pip install smithy-agent
-smithy-agent --orchestrator http://orch-host:8000 --name my-agent \
+pip install smithcore-agent
+smithcore-agent --orchestrator http://orch-host:8000 --name my-agent \
     --url http://this-machine:8001
 ```
 
@@ -47,15 +47,15 @@ Use a dedicated local user with auto-logon for production agents.
 
 ```bash
 # one command: writes config + creates the scheduled task
-smithy-agent-service install \
+smithcore-agent-service install \
     --orchestrator http://orch-host:8000 \
     --name prod-1 \
     --join-token <AGENT_JOIN_TOKEN> \
     --user "WORKGROUP\\rpa-bot"     # optional, default: current user
 
-smithy-agent-service start        # launch now
-smithy-agent-service status       # task state
-smithy-agent-service stop | uninstall
+smithcore-agent-service start        # launch now
+smithcore-agent-service status       # task state
+smithcore-agent-service stop | uninstall
 ```
 
 What you get:
@@ -65,8 +65,8 @@ What you get:
 * Task Scheduler restart policy (up to 999 retries, 1-minute interval) and,
   belt and braces, a crash-restart loop inside the agent with exponential
   backoff (5 s → 60 s, reset after a stable 5-minute run);
-* config at `%LOCALAPPDATA%\smithy_agent\config.json`, rolling log at
-  `%LOCALAPPDATA%\smithy_agent\agent.log`.
+* config at `%LOCALAPPDATA%\smithcore_agent\config.json`, rolling log at
+  `%LOCALAPPDATA%\smithcore_agent\agent.log`.
 
 Registration honours `AGENT_JOIN_TOKEN` (pre-shared in the orchestrator
 settings) or an admin JWT — whichever you pass with `--join-token`.
@@ -79,5 +79,5 @@ just the automated app — and uploads it to the orchestrator. Keep this in
 mind on shared/multi-user machines: anything on screen at the moment of
 failure (other apps, browser sessions, passwords) ends up in the cloud.
 
-Deploy with the plain smithy-agent package if screenshots are unwanted;
+Deploy with the plain smithcore-agent package if screenshots are unwanted;
 the agent runs fine without the extra and simply skips capture.
