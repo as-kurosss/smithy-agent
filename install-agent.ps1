@@ -1,6 +1,6 @@
 #requires -Version 5.1
 <#
-Smithcore agent one-line installer (Windows).
+SmithCore agent one-line installer (Windows).
 
 Usage (regular PowerShell, elevated not required - it will self-elevate):
 
@@ -74,7 +74,7 @@ if (-not (Test-Admin)) {
     exit $proc.ExitCode
 }
 
-Write-Host "=== Smithcore agent installer ==="
+Write-Host "=== SmithCore agent installer ==="
 
 # ---------------------------------------------------------------- orchestrator
 if (-not $Orchestrator) {

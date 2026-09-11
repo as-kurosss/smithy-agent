@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "smithcore-agent"
 version = "0.3.2"
-description = "Smithcore RPA agent - runs on Windows machines and executes processes dispatched by a smithcore-cloud orchestrator"
+description = "SmithCore RPA agent - runs on Windows machines and executes processes dispatched by a smithcore-cloud orchestrator"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"

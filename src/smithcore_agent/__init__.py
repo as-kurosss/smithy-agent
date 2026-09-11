@@ -1,4 +1,4 @@
-"""Smithcore Cloud Agent — runs on each server and communicates with the orchestrator."""
+"""SmithCore Cloud Agent — runs on each server and communicates with the orchestrator."""
 
 from __future__ import annotations
 

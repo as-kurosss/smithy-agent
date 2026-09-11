@@ -25,7 +25,7 @@ from smithcore_agent.config import CONFIG_PATH, load_config, save_config
 
 logger = logging.getLogger("smithcore_agent")
 
-TASK_NAME = "SmithcoreAgent"
+TASK_NAME = "SmithCoreAgent"
 _RESTART_BACKOFF_START_S = 5.0
 _RESTART_BACKOFF_MAX_S = 60.0
 

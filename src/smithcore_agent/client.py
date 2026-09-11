@@ -1,4 +1,4 @@
-"""HTTP client for communicating with the Smithcore orchestrator."""
+"""HTTP client for communicating with the SmithCore orchestrator."""
 
 from __future__ import annotations
 

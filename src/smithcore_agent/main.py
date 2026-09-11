@@ -1,4 +1,4 @@
-"""Entry point for the Smithcore agent.
+"""Entry point for the SmithCore agent.
 
 Run with::
 
@@ -402,7 +402,7 @@ def main() -> None:
     """Parse CLI arguments and start the agent."""
     parser = argparse.ArgumentParser(
         prog="smithcore-agent",
-        description="Smithcore Cloud agent — communicates with the orchestrator.",
+        description="SmithCore Cloud agent — communicates with the orchestrator.",
     )
     parser.add_argument(
         "--orchestrator",
