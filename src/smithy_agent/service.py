@@ -122,6 +122,11 @@ def run_forever() -> None:
 # ---------------------------------------------------------------------
 
 
+def _ps_quote(value: str) -> str:
+    """Single-quote a value for PowerShell (`'` → `''`)."""
+    return "'" + value.replace("'", "''") + "'"
+
+
 def task_command(
     python_exe: str,
     user: str | None = None,
@@ -139,9 +144,9 @@ def task_command(
         python_exe = str(windowless)
     parts = [
         "$action = New-ScheduledTaskAction -Execute "
-        f"'{python_exe}' -Argument '-m smithy_agent.service run' "
-        f"-WorkingDirectory '{Path.home()}'",
-        f"$trigger = New-ScheduledTaskTrigger -AtLogOn -User '{user}'"
+        f"{_ps_quote(python_exe)} -Argument '-m smithy_agent.service run' "
+        f"-WorkingDirectory {_ps_quote(str(Path.home()))}",
+        f"$trigger = New-ScheduledTaskTrigger -AtLogOn -User {_ps_quote(user)}"
         if user
         else "$trigger = New-ScheduledTaskTrigger -AtLogOn",
         "$settings = New-ScheduledTaskSettingsSet -RestartCount 999 "
@@ -151,17 +156,18 @@ def task_command(
     ]
     if user:
         parts.append(
-            f"$principal = New-ScheduledTaskPrincipal -UserId '{user}' -LogonType Interactive"
+            f"$principal = New-ScheduledTaskPrincipal -UserId {_ps_quote(user)}"
+            " -LogonType Interactive"
         )
         parts.append(
             "Register-ScheduledTask -TaskName "
-            f"'{TASK_NAME}' -Action $action -Trigger $trigger "
+            f"{_ps_quote(TASK_NAME)} -Action $action -Trigger $trigger "
             "-Settings $settings -Principal $principal -Force"
         )
     else:
         parts.append(
             "Register-ScheduledTask -TaskName "
-            f"'{TASK_NAME}' -Action $action -Trigger $trigger "
+            f"{_ps_quote(TASK_NAME)} -Action $action -Trigger $trigger "
             "-Settings $settings -Force"
         )
     return " ; ".join(parts)

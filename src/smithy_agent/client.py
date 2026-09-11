@@ -18,6 +18,19 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = 5
 HEARTBEAT_INTERVAL_SECONDS = 30
 REAUTH_BACKOFF_S = 60.0
+MAX_PACK_BYTES = 200 * 1024 * 1024
+MAX_ARTIFACT_BYTES = 6 * 1024 * 1024
+
+
+def _redact_for_log(text: str, *, limit: int = 500) -> str:
+    """Truncate server-echo text for logs and mask obvious secrets."""
+    import re as _re
+
+    snippet = text[:limit]
+    snippet = _re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~-]+", r"\1***", snippet)
+    snippet = _re.sub(r"(?i)(token\s*[:=]\s*)['\"]?[^'\"\s,}]+", r"\1***", snippet)
+    snippet = _re.sub(r"(?i)(password\s*[:=]\s*)['\"]?[^'\"\s,}]+", r"\1***", snippet)
+    return snippet
 
 
 def agent_version() -> str:
@@ -180,7 +193,13 @@ class OrchestratorClient:
             await self._re_authenticate()
             resp = await self._get(path)
         resp.raise_for_status()
-        return resp.content
+        length = resp.headers.get("content-length")
+        if length is not None and length.isdigit() and int(length) > MAX_PACK_BYTES:
+            raise OrchestratorError(f"pack too large ({length} bytes)")
+        data = resp.content
+        if len(data) > MAX_PACK_BYTES:
+            raise OrchestratorError(f"pack too large ({len(data)} bytes)")
+        return data
 
     # ------------------------------------------------------------------
     # Polling
@@ -259,6 +278,8 @@ class OrchestratorClient:
         """Upload a binary artifact for a run (e.g. a failure screenshot)."""
         import base64
 
+        if len(data) > MAX_ARTIFACT_BYTES:
+            raise OrchestratorError(f"artifact too large ({len(data)} bytes)")
         payload: dict[str, Any] = {
             "run_id": run_id,
             "filename": filename,
@@ -297,9 +318,12 @@ class OrchestratorClient:
         return await self._http.get(path, headers=self._auth_headers)
 
     async def _post(self, path: str, *, json: Any = None, retry: bool = False) -> httpx.Response:
+        import random as _random
+
         logger.debug("POST %s", path)
         # Status/log pushes are critical: transient 5xx/network blips are
-        # retried with backoff so runs don't stick in RUNNING forever.
+        # retried with backoff+jitter so runs don't stick in RUNNING forever
+        # and the fleet doesn't retry in lockstep.
         attempts = 3 if retry else 1
         delay = 0.5
         resp: httpx.Response | None = None
@@ -314,12 +338,13 @@ class OrchestratorClient:
                     break
                 logger.warning("POST %s attempt %d -> %s", path, attempt + 1, resp.status_code)
             if attempt + 1 < attempts:
-                await asyncio.sleep(delay)
+                await asyncio.sleep(delay * (0.5 + _random.random()))
                 delay *= 2.0
         if resp is None:
             raise OrchestratorError(f"POST {path} failed after {attempts} attempts (network)")
         if resp.status_code >= 400:
             # 4xx is terminal (auth/validation) — warn but don't raise so the
             # agent loop survives; 5xx after retries also only warns.
-            logger.warning("POST %s -> %s: %s", path, resp.status_code, resp.text[:500])
+            # Never log raw server echo: it may contain assets/secrets.
+            logger.warning("POST %s -> %s: %s", path, resp.status_code, _redact_for_log(resp.text))
         return resp

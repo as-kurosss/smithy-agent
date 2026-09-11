@@ -19,6 +19,18 @@ _STRUCTURED_RE = re.compile(r"^\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]\s*(.*)$")
 _BATCH_SIZE = 20
 MAX_LINE_CHARS = 20_000
 
+_SECRET_PATTERNS = (
+    re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~-]+"),
+    re.compile(r"(?i)((?:token|password|secret|api[_-]?key)\s*[:=]\s*)['\"]?[^'\"\s,}]+"),
+    re.compile(r"SMITHY_AGENT_TOKEN=\S+"),
+)
+
+
+def _scrub_line(text: str) -> str:
+    for rx in _SECRET_PATTERNS:
+        text = rx.sub(r"\1***", text)
+    return text
+
 
 class LogStreamer:
     """Reads stdout/stderr from a subprocess and pushes logs to the orchestrator."""
@@ -75,6 +87,7 @@ class LogStreamer:
             text = raw_line.decode("utf-8", errors="replace").rstrip("\n\r")
             if truncated:
                 text = text[:MAX_LINE_CHARS] + "…[truncated]"
+            text = _scrub_line(text)
             entry = self._parse_line(text, source)
             self._buffer.append(entry)
 

@@ -8,6 +8,7 @@ hosts and headless sessions (no interactive desktop to capture).
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import sys
 
@@ -37,24 +38,39 @@ def capture_screenshot() -> tuple[bytes, str] | None:
             monitor = sct.monitors[0]  # full virtual screen (all monitors)
             raw = sct.grab(monitor)
             img = Image.frombytes("RGB", raw.size, raw.rgb)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=True)
     except Exception:
         logger.exception("Screenshot capture failed")
         return None
-    data = buf.getvalue()
+    def _close(obj: object) -> None:
+        close = getattr(obj, "close", None)
+        if callable(close):
+            with contextlib.suppress(Exception):
+                close()
 
-    if len(data) > MAX_SCREENSHOT_BYTES:
-        # Downscale just enough to fit (keep aspect ratio, JPEG-quality trick
-        # is not applicable - keep PNG but shrink).
-        scale = (MAX_SCREENSHOT_BYTES / len(data)) ** 0.5
-        img = img.resize((max(1, int(img.width * scale)), max(1, int(img.height * scale))))
-        resized = io.BytesIO()
-        img.save(resized, format="PNG", optimize=True)
-        data = resized.getvalue()
+    try:
+        with io.BytesIO() as buf:
+            img.save(buf, format="PNG", optimize=True)
+            data = buf.getvalue()
         if len(data) > MAX_SCREENSHOT_BYTES:
-            logger.warning("Screenshot exceeds size cap even after downscale - dropping")
-            return None
+            # Downscale just enough to fit (keep aspect ratio).
+            scale = (MAX_SCREENSHOT_BYTES / len(data)) ** 0.5
+            resized_img = img.resize(
+                (max(1, int(img.width * scale)), max(1, int(img.height * scale)))
+            )
+            try:
+                with io.BytesIO() as resized:
+                    resized_img.save(resized, format="PNG", optimize=True)
+                    data = resized.getvalue()
+            finally:
+                _close(resized_img)
+            if len(data) > MAX_SCREENSHOT_BYTES:
+                logger.warning("Screenshot exceeds size cap even after downscale - dropping")
+                return None
+    except Exception:
+        logger.exception("Screenshot encode failed")
+        return None
+    finally:
+        _close(img)
 
     from datetime import UTC, datetime
 

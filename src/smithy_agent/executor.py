@@ -61,6 +61,35 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+#: pip directives that turn a requirements line into repository/code execution.
+_BLOCKED_REQ_PREFIXES = ("-", "--", "http://", "https://", "git+", "file:", "ftp:")
+_BLOCKED_REQ_SUBSTRINGS = ("--extra-index-url", "--trusted-host", "--index-url", "-f ", ";")
+
+
+def check_requirements(requirements: list[str]) -> None:
+    """Reject pip option injection in server-supplied requirements.
+
+    A `requirements` entry must be a plain `name[extra]specifier` line —
+    no options (`--extra-index-url`), no URLs, no `git+`, no `-e`, no
+    environment markers with `;` (which can invoke setup code paths).
+    """
+    import re as _re
+
+    # Permissive but option-free: name + optional extras + version specifiers.
+    _ok = _re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9._,-]+\])?\s*([=<>!~]+.*)?$")
+    for req in requirements:
+        if not isinstance(req, str) or not req.strip():
+            raise ValueError(f"Refusing empty requirement entry: {req!r}")
+        line = req.strip()
+        lowered = line.lower()
+        if line.startswith(_BLOCKED_REQ_PREFIXES) or lowered.startswith(("-e ", "--")):
+            raise ValueError(f"Refusing pip option/URL requirement: {line!r}")
+        if any(token in line for token in _BLOCKED_REQ_SUBSTRINGS) or "@" in line:
+            raise ValueError(f"Refusing complex requirement (URL/option/marker): {line!r}")
+        if not _ok.match(line):
+            raise ValueError(f"Refusing malformed requirement: {line!r}")
+
+
 def _safe_extract(data: bytes, dest: Path) -> None:
     """Extract a pack zip into *dest*, rejecting unsafe member paths.
 
@@ -197,19 +226,25 @@ class ProcessExecutor:
         Path
             Absolute path to the deployed process directory.
         """
+        if not isinstance(requirements, list) or not all(
+            isinstance(r, str) for r in requirements
+        ):
+            raise ValueError("requirements must be a list of strings")
+        check_requirements(requirements)
         proc_dir = self.processes_dir / process_id
         proc_dir.mkdir(parents=True, exist_ok=True)
         logger.info("Deploying process %s to %s", process_id, proc_dir)
 
+        # Heavy disk/zip/hash IO off the event loop.
         if pack_data is not None:
-            self._install_pack(process_id, proc_dir, pack_data)
+            await asyncio.to_thread(self._install_pack, process_id, proc_dir, pack_data)
         else:
-            self._write_files(proc_dir, files)
+            await asyncio.to_thread(self._write_files, proc_dir, files)
 
         # Write requirements.txt
         req_path = proc_dir / "requirements.txt"
         req_text = "\n".join(requirements)
-        req_path.write_text(req_text, encoding="utf-8")
+        await asyncio.to_thread(req_path.write_text, req_text, encoding="utf-8")
 
         # Create / update virtual environment
         venv_dir = proc_dir / ".venv"

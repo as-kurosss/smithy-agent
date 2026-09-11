@@ -34,6 +34,7 @@ console = Console()
 
 _running_tasks: set[asyncio.Task[None]] = set()
 _MAX_CONCURRENT_RUNS = 4
+_MAX_COMMANDS_PER_POLL = 100
 _semaphore: asyncio.Semaphore | None = None
 _run_to_process: dict[str, str] = {}
 
@@ -65,6 +66,11 @@ async def _run_env(client: OrchestratorClient, process_id: str) -> dict[str, str
     asset by id/GUID or name from the orchestrator at run time
     (``HttpAssetProvider``), scoped to *process_id* so a flow can only read
     the assets its process is allowed.
+
+    NOTE: ``SMITHY_AGENT_TOKEN`` is the agent credential — deployed process
+    code is trusted to the same degree as the agent itself. Do not run
+    unreviewed third-party flows with production credentials; scope assets
+    per process server-side.
     """
     return {
         "SMITHY_ORCHESTRATOR_URL": client.orchestrator_url,
@@ -179,6 +185,10 @@ async def execute_command(
                 return
             try:
                 requirements = process_data.get("requirements", [])
+                if not isinstance(requirements, list) or not all(
+                    isinstance(r, str) for r in requirements
+                ):
+                    raise ValueError("malformed requirements (must be a list of strings)")
                 if _is_pack_run(process_data):
                     requirements = _pack_requirements(requirements)
                 await _deploy_process(client, executor, process_id, process_data, requirements)
@@ -214,6 +224,12 @@ async def execute_command(
 
         if run_id is None:
             logger.warning("Run command for process %s has no run_id — skipping", process_id)
+            return
+        requirements = process_data.get("requirements", [])
+        if not isinstance(requirements, list) or not all(
+            isinstance(r, str) for r in requirements
+        ):
+            logger.warning("Run %s has malformed requirements — ignoring", run_id)
             return
 
         logger.info("Executing run %s (process %s)", run_id, process_id)
@@ -268,7 +284,19 @@ async def execute_command(
 
 
 async def _attach_failure_screenshot(client: OrchestratorClient, run_id: str) -> None:
-    """Best-effort screenshot on failure: must never mask the real error."""
+    """Best-effort screenshot on failure: must never mask the real error.
+
+    Opt-out via ``SMITHY_SCREENSHOT_ON_FAILURE=0``: screenshots capture the
+    whole virtual desktop and may contain passwords/PII.
+    """
+    import os as _os
+
+    if _os.environ.get("SMITHY_SCREENSHOT_ON_FAILURE", "1").strip().lower() in (
+        "0",
+        "false",
+        "no",
+    ):
+        return
     from smithy_agent.screenshot import capture_screenshot
 
     try:
@@ -306,6 +334,13 @@ async def run_agent(
     global _semaphore
     _semaphore = asyncio.Semaphore(_MAX_CONCURRENT_RUNS)
 
+    from smithy_agent.config import check_orchestrator_url
+
+    try:
+        check_orchestrator_url(orchestrator_url)
+    except ValueError as exc:
+        raise SystemExit(f"refusing orchestrator URL: {exc}") from exc
+
     client = OrchestratorClient(
         orchestrator_url,
         agent_name,
@@ -334,6 +369,13 @@ async def run_agent(
         while True:
             try:
                 commands = await client.poll()
+                if len(commands) > _MAX_COMMANDS_PER_POLL:
+                    logger.warning(
+                        "Poll returned %d commands, capping to %d",
+                        len(commands),
+                        _MAX_COMMANDS_PER_POLL,
+                    )
+                    commands = commands[:_MAX_COMMANDS_PER_POLL]
                 for cmd in commands:
                     task = asyncio.create_task(execute_command(client, executor, cmd))
                     _running_tasks.add(task)

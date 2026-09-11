@@ -6,6 +6,7 @@ runs inside the user's interactive session, which UI automation requires).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -61,7 +62,23 @@ def save_config(
         payload["agent_id"] = agent_id
     if agent_secret:
         payload["agent_secret"] = agent_secret
-    CONFIG_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    # Atomic write + owner-only permissions: config holds bearer secrets.
+    import os
+    import tempfile
+
+    text = json.dumps(payload, indent=2) + "\n"
+    fd, tmp_name = tempfile.mkstemp(dir=str(CONFIG_DIR), prefix=".config-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        with contextlib.suppress(OSError):
+            os.chmod(tmp_name, 0o600)
+        Path(tmp_name).replace(CONFIG_PATH)
+        with contextlib.suppress(OSError):
+            os.chmod(CONFIG_PATH, 0o600)
+    finally:
+        with contextlib.suppress(OSError):
+            Path(tmp_name).unlink()
     return CONFIG_PATH
 
 
@@ -94,3 +111,23 @@ def detect_local_ip(orchestrator_url: str) -> str:
 def agent_url_for(orchestrator_url: str, port: int = DEFAULT_AGENT_PORT) -> str:
     """Default public URL: http://<this-machine-ip>:<port>."""
     return f"http://{detect_local_ip(orchestrator_url)}:{port}"
+
+
+def check_orchestrator_url(url: str) -> None:
+    """Refuse cleartext http orchestrator URLs for non-loopback hosts.
+
+    The join token and agent secret travel as Bearer credentials — plain
+    http would expose them. Loopback stays allowed for local development.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("orchestrator URL must be http(s)")
+    if parsed.scheme == "http":
+        host = (parsed.hostname or "").lower()
+        if host not in ("localhost", "127.0.0.1", "::1"):
+            raise ValueError(
+                "orchestrator URL must use https:// for non-loopback hosts "
+                "(tokens would travel in cleartext)"
+            )
